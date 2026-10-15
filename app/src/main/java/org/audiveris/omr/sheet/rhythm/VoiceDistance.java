@@ -88,14 +88,6 @@ public abstract class VoiceDistance
 
     //~ Methods ------------------------------------------------------------------------------------
 
-    /**
-     * Report the distance between two chords, assumed to be in different time slots.
-     *
-     * @param left    chord on the left
-     * @param right   chord on the right
-     * @param details (optional output) if not null, to be populated by distance details
-     * @return the evaluated voice-wise 'distance' between these two chords
-     */
     //-----------//
     // getNoLink //
     //-----------//
@@ -131,6 +123,14 @@ public abstract class VoiceDistance
         return this;
     }
 
+    /**
+     * Report the distance between two chords, assumed to be in different time slots.
+     *
+     * @param left    chord on the left
+     * @param right   chord on the right
+     * @param details (optional output) if not null, to be populated by distance details
+     * @return the evaluated voice-wise 'distance' between these two chords
+     */
     public abstract int getDistance (AbstractChordInter left,
                                      AbstractChordInter right,
                                      StringBuilder details);
