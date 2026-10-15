@@ -95,6 +95,7 @@ import java.util.SortedSet;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -1969,8 +1970,14 @@ public class Book
                         logger.info("Initial book processing until {}", maxStep);
                     }
 
+                    // Limit the number of sheets processed at the same time, otherwise a book
+                    // with many sheets starves each of them of CPU (and steps time out)
+                    final Semaphore slots = new Semaphore(
+                            Math.max(1, Runtime.getRuntime().availableProcessors()));
+
                     for (final SheetStub stub : theStubs) {
                         tasks.add( () -> {
+                            slots.acquire();
                             LogUtil.start(stub);
 
                             try {
@@ -1984,6 +1991,7 @@ public class Book
                             } finally {
                                 stub.printWatch(false);
                                 LogUtil.stopStub();
+                                slots.release();
                             }
                         });
                     }
@@ -2637,13 +2645,37 @@ public class Book
                                boolean swap)
     {
         boolean ok = reachBookStep(OmrStep.last(), false, theStubs, swap);
+        List<SheetStub> stubsToUse = theStubs;
+
+        if (!ok) {
+            // A failure on some sheet(s) should not prevent the export of the other sheets
+            final List<SheetStub> completed = new ArrayList<>();
+
+            for (SheetStub stub : theStubs) {
+                if (stub.isValid() && stub.isDone(OmrStep.last())) {
+                    completed.add(stub);
+                }
+            }
+
+            if (!completed.isEmpty()) {
+                final List<SheetStub> failed = new ArrayList<>(theStubs);
+                failed.removeAll(completed);
+
+                if (!failed.isEmpty()) {
+                    logger.warn("Transcription failed on {}, using the other sheets", failed);
+                }
+
+                stubsToUse = completed;
+                ok = true;
+            }
+        }
 
         if (ok) {
             if (theScores.isEmpty()) {
-                createScores(theStubs, theScores);
+                createScores(stubsToUse, theScores);
             }
 
-            reduceScores(theStubs, theScores);
+            reduceScores(stubsToUse, theScores);
         }
 
         return ok;

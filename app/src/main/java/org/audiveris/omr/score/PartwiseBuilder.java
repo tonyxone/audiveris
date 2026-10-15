@@ -67,6 +67,7 @@ import org.audiveris.omr.sig.inter.FingeringInter;
 import org.audiveris.omr.sig.inter.HeadChordInter;
 import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
+import org.audiveris.omr.sig.inter.Inters;
 import org.audiveris.omr.sig.inter.KeyInter;
 import org.audiveris.omr.sig.inter.LyricItemInter;
 import org.audiveris.omr.sig.inter.MarkerInter;
@@ -245,6 +246,7 @@ import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Locale;
@@ -1381,6 +1383,82 @@ public class PartwiseBuilder
                         : factory.createTechnicalUpBow(placement));
     }
 
+    //-----------------//
+    // getOrphanGraces //
+    //-----------------//
+    /**
+     * Gather the small chords of a measure which are neither in a voice nor linked as
+     * grace to a standard chord (typically the many small notes of a cadenza).
+     * <p>
+     * Each of them is assigned to the next standard chord on the right (preferably in the same
+     * staff), so that it can be exported as a grace note before this chord, rather than be lost.
+     * Small chords with no standard chord on their right are mapped to the null key.
+     *
+     * @param measure the measure to process
+     * @return the map: standard chord &rarr; preceding orphan small chords (in abscissa order)
+     */
+    private static Map<AbstractChordInter, List<SmallChordInter>> getOrphanGraces (Measure measure)
+    {
+        final Map<AbstractChordInter, List<SmallChordInter>> map = new LinkedHashMap<>();
+        final Set<AbstractChordInter> linked = new LinkedHashSet<>();
+        final List<AbstractChordInter> targets = new ArrayList<>();
+
+        for (AbstractChordInter chord : measure.getStandardChords()) {
+            if ((chord.getVoice() == null) || (chord.getTimeOffset() == null)) {
+                continue;
+            }
+
+            targets.add(chord);
+
+            if (chord instanceof HeadChordInter headChord) {
+                final SmallChordInter small = headChord.getGraceChord();
+
+                if (small != null) {
+                    final BeamGroupInter group = small.getBeamGroup();
+                    linked.addAll((group != null) ? group.getChords() : List.of(small));
+                }
+            }
+        }
+
+        final List<SmallChordInter> orphans = new ArrayList<>();
+
+        for (HeadChordInter chord : measure.getHeadChords()) {
+            if ((chord instanceof SmallChordInter small) && (small.getVoice() == null)
+                    && !linked.contains(small)) {
+                orphans.add(small);
+            }
+        }
+
+        Collections.sort(orphans, Inters.byCenterAbscissa);
+
+        for (SmallChordInter small : orphans) {
+            final double x = small.getCenter().x;
+            AbstractChordInter best = null; // Next chord on right, in same staff
+            AbstractChordInter other = null; // Next chord on right, in any staff
+
+            for (AbstractChordInter target : targets) {
+                final double tx = target.getCenter().x;
+
+                if (tx > x) {
+                    if ((target.getTopStaff() == small.getTopStaff())
+                            && ((best == null) || (tx < best.getCenter().x))) {
+                        best = target;
+                    }
+
+                    if ((other == null) || (tx < other.getCenter().x)) {
+                        other = target;
+                    }
+                }
+            }
+
+            // Lacking any chord on right, they will be appended at the end of the measure
+            final AbstractChordInter key = (best != null) ? best : other;
+            map.computeIfAbsent(key, k -> new ArrayList<>()).add(small);
+        }
+
+        return map;
+    }
+
     //--------------//
     // processChord //
     //--------------//
@@ -2072,6 +2150,10 @@ public class PartwiseBuilder
                 processRehearsal(rehearsal);
             }
 
+            // Small chords not linked to any standard chord, to be exported as graces
+            final Map<AbstractChordInter, List<SmallChordInter>> orphanGraces = getOrphanGraces(
+                    measure);
+
             // Now voice per voice
             Rational timeCounter = Rational.ZERO;
 
@@ -2114,6 +2196,15 @@ public class PartwiseBuilder
                             // Wedge events occurring at this time offset?
                             wedgeIters.push(timeOffset);
 
+                            // Unlinked small chords (e.g. a cadenza) before this chord?
+                            final List<SmallChordInter> orphans = orphanGraces.get(chord);
+
+                            if (orphans != null) {
+                                for (SmallChordInter small : orphans) {
+                                    processChord(small);
+                                }
+                            }
+
                             // Grace chord(s) before this chord?
                             if (chord instanceof HeadChordInter headChord) {
                                 SmallChordInter small = headChord.getGraceChord();
@@ -2147,6 +2238,17 @@ public class PartwiseBuilder
                     //                            timeCounter = timeCounter.plus(delta);
                     //                        }
                     //                    }
+                }
+
+                // Orphan small chords with no standard chord on their right, after last voice
+                if (voice == measure.getVoices().get(measure.getVoices().size() - 1)) {
+                    final List<SmallChordInter> trailing = orphanGraces.get(null);
+
+                    if (trailing != null) {
+                        for (SmallChordInter small : trailing) {
+                            processChord(small);
+                        }
+                    }
                 }
 
                 current.endVoice();
@@ -2479,6 +2581,10 @@ public class PartwiseBuilder
 
             // Voice
             Voice voice = chord.getVoice();
+
+            if ((voice == null) && (chord instanceof SmallChordInter)) {
+                voice = current.voice; // A grace chord belongs to the voice being written
+            }
 
             if (voice != null) {
                 current.pmNote.setVoice("" + voice.getId());

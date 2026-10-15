@@ -37,7 +37,9 @@ import org.audiveris.omr.glyph.ui.GlyphsController;
 import org.audiveris.omr.image.ImageFormatException;
 import org.audiveris.omr.lag.LagManager;
 import org.audiveris.omr.lag.Lags;
+import org.audiveris.omr.run.Orientation;
 import org.audiveris.omr.run.RunTable;
+import org.audiveris.omr.run.RunTableFactory;
 import org.audiveris.omr.score.Page;
 import org.audiveris.omr.score.PageRef;
 import org.audiveris.omr.score.PartRef;
@@ -81,6 +83,9 @@ import org.audiveris.omr.util.Version;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import ij.process.ByteProcessor;
+import ij.process.ImageProcessor;
 
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
@@ -1428,6 +1433,36 @@ public class Sheet
                             glyph);
                 }
             }
+        }
+    }
+
+    //---------------//
+    // upscaleBinary //
+    //---------------//
+    /**
+     * Replace the sheet picture by an upscaled version of its binary image.
+     * <p>
+     * This is meant for pictures whose resolution is too low (too small interline).
+     * The binary image is interpolated, then thresholded again, to keep smooth edges.
+     *
+     * @param factor the integer upscaling factor
+     */
+    public void upscaleBinary (int factor)
+    {
+        final ByteProcessor src = picture.getSource(Picture.SourceKey.BINARY);
+        src.setInterpolationMethod(ImageProcessor.BILINEAR);
+
+        final ByteProcessor big = (ByteProcessor) src.resize(
+                src.getWidth() * factor,
+                src.getHeight() * factor,
+                true);
+        big.threshold(127); // Values <= 127 -> 0 (black), others -> 255 (white)
+
+        final RunTable table = new RunTableFactory(Orientation.VERTICAL).createTable(big);
+        picture = new Picture(this, table);
+
+        if (OMR.gui != null) {
+            createBinaryView();
         }
     }
 

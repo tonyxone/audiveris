@@ -1270,6 +1270,10 @@ public class NoteHeadsBuilder
                 0.38,
                 "How much do we boost stem-less heads (always isolated)");
 
+        private final Constant.Ratio minStemLessGrade = new Constant.Ratio(
+                0.55,
+                "Minimum boosted grade for a stem-less head");
+
         private final Constant.Ratio crossBoost = new Constant.Ratio(
                 0.0, // Was 0.1,
                 "How much do we boost cross heads (badly recognized by template matching)");
@@ -1936,7 +1940,9 @@ public class NoteHeadsBuilder
             double grade = new HeadInter.Impacts(Template.impactOf(loc.d)).getGrade();
             grade = AbstractInter.increaseGrade(grade, getStemLessBoost());
 
-            return grade < Grades.minContextualGrade;
+            // Boosted grades just above the contextual minimum are mostly fake whole heads
+            // (e.g. found in a clef, a fermata or some text), hence a stricter minimum
+            return grade < Math.max(Grades.minContextualGrade, constants.minStemLessGrade.getValue());
         }
 
         //--------//

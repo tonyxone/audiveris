@@ -61,6 +61,7 @@ import java.awt.Color;
 import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
@@ -86,6 +87,12 @@ public class HeaderTimeBuilder
     //~ Static fields/initializers -----------------------------------------------------------------
 
     private static final Logger logger = LoggerFactory.getLogger(HeaderTimeBuilder.class);
+
+    /** Minimum glyph width (in interlines) to be checked as a two-digit number. */
+    private static final double MIN_TWO_DIGITS_WIDTH = 1.5;
+
+    /** Single time digits. */
+    private static final Set<Shape> DIGITS = EnumSet.range(Shape.TIME_ZERO, Shape.TIME_NINE);
 
     //~ Instance fields ----------------------------------------------------------------------------
 
@@ -582,6 +589,187 @@ public class HeaderTimeBuilder
                     }
                 }
             }
+
+            evaluateTwoDigits(glyph);
+        }
+
+        //-------------------//
+        // evaluateTwoDigits //
+        //-------------------//
+        /**
+         * Evaluate a wide glyph as a two-digit number (12 or 16) whose digits touch.
+         * <p>
+         * The glyph is split at its thinnest column around its middle, and each side is
+         * evaluated as a single digit.
+         *
+         * @param glyph the (wide) glyph to evaluate
+         */
+        private void evaluateTwoDigits (Glyph glyph)
+        {
+            final int interline = staff.getSpecificInterline();
+            final Rectangle box = glyph.getBounds();
+
+            if (box.width < (MIN_TWO_DIGITS_WIDTH * interline)) {
+                return;
+            }
+
+            // Thinnest column in the middle half of the glyph
+            final ByteProcessor buf = glyph.getBuffer();
+            int splitX = -1;
+            int minInk = Integer.MAX_VALUE;
+
+            for (int x = box.width / 4; x <= ((3 * box.width) / 4); x++) {
+                int ink = 0;
+
+                for (int y = 0; y < box.height; y++) {
+                    if (buf.get(x, y) == 0) {
+                        ink++;
+                    }
+                }
+
+                if (ink < minInk) {
+                    minInk = ink;
+                    splitX = x;
+                }
+            }
+
+            final Evaluation left = evaluateDigit(buf, box, 0, splitX);
+            final Evaluation right = evaluateDigit(buf, box, splitX, box.width);
+
+            if (right == null) {
+                return;
+            }
+
+            // The classifier may not know a (serif) digit '1', which is easy to check directly
+            final double leftGrade;
+
+            if ((left != null) && (left.shape == Shape.TIME_ONE)) {
+                leftGrade = left.grade;
+            } else if (looksLikeOne(buf, 0, splitX, box.height)) {
+                leftGrade = right.grade;
+            } else {
+                return;
+            }
+
+            final Shape shape = switch (right.shape) {
+                case TIME_TWO -> Shape.TIME_TWELVE;
+                case TIME_SIX -> Shape.TIME_SIXTEEN;
+                default -> null;
+            };
+
+            if ((shape == null) || !halfShapes.contains(shape)) {
+                return;
+            }
+
+            final double grade = Grades.intrinsicRatio * Math.min(leftGrade, right.grade);
+            final Inter bestInter = bestMap.get(shape);
+
+            if ((bestInter == null) || (bestInter.getGrade() < grade)) {
+                final TimeNumberInter inter = TimeNumberInter.create(glyph, shape, grade, staff);
+
+                if (inter != null) {
+                    logger.debug("Staff#{} {} two digits {}", staff.getId(), half, inter);
+                    bestMap.put(shape, inter);
+                }
+            }
+        }
+
+        //--------------//
+        // looksLikeOne //
+        //--------------//
+        /**
+         * Check whether the columns [x1..x2[ of a glyph buffer look like a digit '1':
+         * almost full height, narrow, and made of a vertical stroke.
+         *
+         * @param buf    the glyph buffer
+         * @param x1     first column
+         * @param x2     column past the last one
+         * @param height the glyph height
+         * @return true if so
+         */
+        private boolean looksLikeOne (ByteProcessor buf,
+                                      int x1,
+                                      int x2,
+                                      int height)
+        {
+            int xMin = Integer.MAX_VALUE;
+            int xMax = -1;
+            int yMin = Integer.MAX_VALUE;
+            int yMax = -1;
+            int maxColumnInk = 0;
+
+            for (int x = x1; x < x2; x++) {
+                int ink = 0;
+
+                for (int y = 0; y < height; y++) {
+                    if (buf.get(x, y) == 0) {
+                        ink++;
+                        xMin = Math.min(xMin, x);
+                        xMax = Math.max(xMax, x);
+                        yMin = Math.min(yMin, y);
+                        yMax = Math.max(yMax, y);
+                    }
+                }
+
+                maxColumnInk = Math.max(maxColumnInk, ink);
+            }
+
+            if (xMax < 0) {
+                return false;
+            }
+
+            final int h = yMax - yMin + 1;
+            final int w = xMax - xMin + 1;
+
+            return (h >= (0.85 * height)) && (w <= (0.6 * h)) && (maxColumnInk >= (0.8 * h));
+        }
+
+        //---------------//
+        // evaluateDigit //
+        //---------------//
+        /**
+         * Evaluate, as a single time digit, the columns [x1..x2[ of a glyph buffer.
+         *
+         * @param buf the glyph buffer
+         * @param box the glyph bounds
+         * @param x1  first column
+         * @param x2  column past the last one
+         * @return the best digit evaluation, or null
+         */
+        private Evaluation evaluateDigit (ByteProcessor buf,
+                                          Rectangle box,
+                                          int x1,
+                                          int x2)
+        {
+            final ByteProcessor side = new ByteProcessor(x2 - x1, box.height);
+            side.copyBits(buf, -x1, 0, Blitter.COPY);
+
+            final RunTable table = new RunTableFactory(Orientation.VERTICAL).createTable(side);
+            final List<Glyph> parts = GlyphFactory.buildGlyphs(
+                    table,
+                    new java.awt.Point(box.x + x1, box.y));
+
+            if (parts.isEmpty()) {
+                return null;
+            }
+
+            Glyph digit = (parts.size() == 1) ? parts.get(0) : GlyphFactory.buildGlyph(parts);
+            digit = system.registerGlyph(digit, null);
+
+            final Evaluation[] evals = ShapeClassifier.getInstance().evaluate(
+                    digit,
+                    staff.getSpecificInterline(),
+                    params.maxEvalRank,
+                    Grades.timeMinGrade / Grades.intrinsicRatio,
+                    null);
+
+            for (Evaluation eval : evals) {
+                if (DIGITS.contains(eval.shape)) {
+                    return eval;
+                }
+            }
+
+            return null;
         }
 
         @Override

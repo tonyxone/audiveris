@@ -61,6 +61,14 @@ public class ScaleStep
     public void doit (Sheet sheet)
         throws StepException
     {
+        // A too-low resolution picture is upscaled, rather than discarded
+        final Integer factor = new ScaleBuilder(sheet).getUpscalingFactor();
+
+        if (factor != null) {
+            logger.info("{} too low resolution, upscaling picture by {}", sheet.getId(), factor);
+            sheet.upscaleBinary(factor);
+        }
+
         final Scale scale = new ScaleBuilder(sheet).retrieveScale();
         logger.info("{}", scale);
         sheet.setScale(scale);

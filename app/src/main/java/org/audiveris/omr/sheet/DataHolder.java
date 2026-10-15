@@ -143,19 +143,22 @@ public abstract class DataHolder<T>
                         Path path = book.openSheetFolder(stub.getNumber()).resolve(pathString);
                         logger.debug("path: {}", path);
 
-                        if (Files.exists(path)) {
-                            try (InputStream is = Files.newInputStream(
-                                    path,
-                                    StandardOpenOption.READ)) {
-                                data = load(is);
-                                logger.debug("Loaded {}", path);
+                        try {
+                            if (Files.exists(path)) {
+                                try (InputStream is = Files.newInputStream(
+                                        path,
+                                        StandardOpenOption.READ)) {
+                                    data = load(is);
+                                    logger.debug("Loaded {}", path);
+                                }
+                            } else {
+                                logger.debug("No {}", path);
+                                hasNoData = true;
                             }
-                        } else {
-                            logger.debug("No {}", path);
-                            hasNoData = true;
+                        } finally {
+                            path.getFileSystem().close(); // Close book file system, even on error
                         }
 
-                        path.getFileSystem().close(); // Close book file system
                         setModified(false);
                     } else {
                         logger.debug("No bookpath for{}", book);

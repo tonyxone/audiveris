@@ -73,9 +73,11 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeMap;
@@ -1145,25 +1147,24 @@ public class StemBuilder
         //        for (StemItem item : list) {
         //            logger.info("   {}", item);
         //        }
-        Collections.sort(
-                list,
-                (se1,
-                 se2) ->
-                {
-                    // Linker pairs are sorted on their refPt ordinate
-                    if (se1 instanceof HalfLinkerItem hl1) {
-                        if (se2 instanceof HalfLinkerItem hl2) {
-                            final Point2D p1 = hl1.linker.getReferencePoint();
-                            final Point2D p2 = hl2.linker.getReferencePoint();
-                            return yDir * Double.compare(p1.getY(), p2.getY());
-                        }
-                    }
+        // A single ordinate key per item, to keep the comparison transitive:
+        // linker pairs on their refPt ordinate, others on their line starting ordinate
+        final Map<StemItem, Double> keys = new HashMap<>();
 
-                    // Others are sorted on their line starting ordinate
-                    return (yDir > 0) //
-                            ? Double.compare(se1.line.getY1(), se2.line.getY1())
-                            : Double.compare(se2.line.getY2(), se1.line.getY2());
-                });
+        for (StemItem item : list) {
+            final double y;
+
+            if (item instanceof HalfLinkerItem hl) {
+                y = hl.linker.getReferencePoint().getY();
+            } else {
+                y = (yDir > 0) ? item.line.getY1() : item.line.getY2();
+            }
+
+            keys.put(item, y);
+        }
+
+        Collections.sort(list, (se1,
+                                se2) -> yDir * Double.compare(keys.get(se1), keys.get(se2)));
     }
 
     //----------//

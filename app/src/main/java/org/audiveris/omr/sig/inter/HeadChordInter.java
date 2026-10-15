@@ -340,7 +340,9 @@ public class HeadChordInter
     {
         // Direct
         for (Relation rel : sig.getRelations(this, ChordGraceRelation.class)) {
-            return (SmallChordInter) sig.getOppositeInter(this, rel);
+            if (sig.getOppositeInter(this, rel) instanceof SmallChordInter smallChord) {
+                return smallChord;
+            }
         }
 
         // Slur
@@ -349,8 +351,10 @@ public class HeadChordInter
                 SlurInter slur = (SlurInter) sig.getOppositeInter(interNote, rel);
                 HeadInter head = slur.getHead(HorizontalSide.LEFT);
 
-                if ((head != null) && head.getShape().isSmallHead()) {
-                    return (SmallChordInter) head.getChord();
+                // A small head may also belong to a standard (cue) head chord
+                if ((head != null) && head.getShape().isSmallHead()
+                        && (head.getChord() instanceof SmallChordInter smallChord)) {
+                    return smallChord;
                 }
             }
         }

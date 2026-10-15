@@ -987,9 +987,9 @@ public class SheetStub
                             sheetFile,
                             StandardOpenOption.READ)) {
                         sheet = Sheet.unmarshal(is);
+                    } finally {
+                        sheetFile.getFileSystem().close(); // Even on error, to allow later access
                     }
-
-                    sheetFile.getFileSystem().close();
                 } finally {
                     book.getLock().unlock();
                 }
@@ -1633,11 +1633,15 @@ public class SheetStub
             try {
                 Path bookPath = BookManager.getDefaultSavePath(book);
                 Path root = ZipFileSystem.open(bookPath);
-                book.storeBookInfo(root); // Book info (book.xml)
 
-                Path sheetFolder = root.resolve(INTERNALS_RADIX + getNumber());
-                sheet.store(sheetFolder, null);
-                root.getFileSystem().close();
+                try {
+                    book.storeBookInfo(root); // Book info (book.xml)
+
+                    Path sheetFolder = root.resolve(INTERNALS_RADIX + getNumber());
+                    sheet.store(sheetFolder, null);
+                } finally {
+                    root.getFileSystem().close(); // Even on error, to allow later access
+                }
             } finally {
                 bookLock.unlock();
             }
