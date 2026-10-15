@@ -260,7 +260,12 @@ public class ScaleBuilder
                             maxHeight));
         }
 
-        final List<Integer> peaks = histoKeeper.blackFunction.getLocalMaxima(minHeight, maxHeight);
+        // Start browsing one pixel before minHeight, otherwise a peak right at minHeight
+        // (typical for thin beams) cannot be detected as a local maximum
+        final List<Integer> peaks = histoKeeper.blackFunction.getLocalMaxima(
+                minHeight - 1,
+                maxHeight);
+        peaks.removeIf(p -> p < minHeight);
 
         if (!peaks.isEmpty()) {
             final int peak = peaks.get(0);
