@@ -1,8 +1,9 @@
 name: Build flatpak package
 
+# Not on release in this fork: its releases are builds for BetterMusicSheet
+# (publish-s3.yml), not Audiveris releases for Flathub.
 on:
   - pull_request
-  - release
   - workflow_dispatch
 
 permissions:
