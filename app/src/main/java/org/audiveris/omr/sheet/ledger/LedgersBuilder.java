@@ -607,6 +607,12 @@ public class LedgersBuilder
             ledger.remove();
         });
 
+        // A candidate whose ledger lost an overlap exclusion may have lost it to a ledger now
+        // discarded (e.g. a tie running along a ledger merged into one wide fake ledger).
+        // Forget such removed interpretations so that their sticks get evaluated again.
+        stick2ledger.values().removeIf(Inter::isRemoved);
+        ledger2stick.keySet().removeIf(Inter::isRemoved);
+
         impactedStaves.forEach(staff -> {
             staff.clearLedgers();
             filterLedgers(staff);
