@@ -1816,8 +1816,18 @@ public class PartwiseBuilder
                 return;
             }
 
+            Integer fifths = keySignature.getFifths();
+
+            if (fifths == null) {
+                if (!keySignature.isCancel()) {
+                    return;
+                }
+
+                fifths = 0; // A key cancellation goes back to no sharp nor flat
+            }
+
             final Key key = factory.createKey();
-            key.setFifths(new BigInteger("" + keySignature.getFifths()));
+            key.setFifths(new BigInteger("" + fifths));
 
             if (global) {
                 // Is this new?
@@ -2528,7 +2538,14 @@ public class PartwiseBuilder
                     final Rational dur;
 
                     if (chord.isMeasureRest()) {
-                        Rational measureDur = current.measure.getStack().getActualDuration();
+                        final MeasureStack stack = current.measure.getStack();
+                        Rational measureDur = stack.getActualDuration();
+
+                        // A measure made only of grace notes (e.g. a cadenza) has no duration
+                        if ((measureDur == null) || (measureDur.compareTo(Rational.ZERO) <= 0)) {
+                            measureDur = stack.getExpectedDuration();
+                        }
+
                         dur = (measureDur != null) ? measureDur : Rational.ONE; // Not too bad...
                     } else {
                         dur = chord.getDuration();
@@ -3215,9 +3232,15 @@ public class PartwiseBuilder
 
             if (slur.isTie()) {
                 // Tie element
-                Tie tie = factory.createTie();
-                tie.setType(isStart ? StartStop.START : StartStop.STOP);
-                current.pmNote.getTie().add(tie);
+                // A note has at most one tie start and one tie stop (a head may be linked to
+                // more than one tie)
+                final StartStop tieType = isStart ? StartStop.START : StartStop.STOP;
+
+                if (current.pmNote.getTie().stream().noneMatch(t -> t.getType() == tieType)) {
+                    Tie tie = factory.createTie();
+                    tie.setType(tieType);
+                    current.pmNote.getTie().add(tie);
+                }
 
                 // Tied element (no number needed, no bezier info, no continuation point)
                 Tied tied = factory.createTied();
