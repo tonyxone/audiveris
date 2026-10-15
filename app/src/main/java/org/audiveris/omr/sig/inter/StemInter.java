@@ -48,6 +48,7 @@ import org.audiveris.omr.sig.relation.Link;
 import org.audiveris.omr.sig.relation.Relation;
 import org.audiveris.omr.sig.relation.StemPortion;
 import static org.audiveris.omr.sig.relation.StemPortion.STEM_BOTTOM;
+import static org.audiveris.omr.sig.relation.StemPortion.STEM_MIDDLE;
 import static org.audiveris.omr.sig.relation.StemPortion.STEM_TOP;
 import org.audiveris.omr.sig.relation.TremoloStemRelation;
 import org.audiveris.omr.sig.ui.InterEditor;
@@ -286,6 +287,20 @@ public class StemInter
         final List<Relation> links = new ArrayList<>(
                 sig.getRelations(this, AbstractStemConnection.class));
         sig.sortBySource(links);
+
+        // A beam tells the stem direction without ambiguity, unlike a (perhaps fake) head
+        for (Relation rel : links) {
+            if (rel instanceof BeamStemRelation link) {
+                final StemPortion portion = link.getStemPortion(
+                        sig.getEdgeSource(rel),
+                        stemLine,
+                        scale);
+
+                if (portion != STEM_MIDDLE) {
+                    return (portion == STEM_TOP) ? (-1) : 1;
+                }
+            }
+        }
 
         for (Relation rel : links) {
             // Source is a head, a beam, a tremolo or a flag
