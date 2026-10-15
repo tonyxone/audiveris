@@ -99,10 +99,10 @@ public class ChordsMapper
         // No link to an active chord
         if (active == null) {
             if (details != null) {
-                details.append("NO_LINK=").append(VoiceDistance.NO_LINK);
+                details.append("NO_LINK=").append(vd.getNoLink());
             }
 
-            return VoiceDistance.NO_LINK;
+            return vd.getNoLink();
         }
 
         // Next list

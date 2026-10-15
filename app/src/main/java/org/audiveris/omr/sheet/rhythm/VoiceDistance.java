@@ -65,6 +65,15 @@ public abstract class VoiceDistance
 
     protected final Scale scale;
 
+    /** Penalty for no voice link. */
+    protected int noLink = NO_LINK;
+
+    /** Penalty for chords with opposite stems. */
+    protected int stemDiffTwo;
+
+    /** Penalty for chords from different staves. */
+    protected int staffDiff;
+
     //~ Constructors -------------------------------------------------------------------------------
 
     /**
@@ -87,6 +96,41 @@ public abstract class VoiceDistance
      * @param details (optional output) if not null, to be populated by distance details
      * @return the evaluated voice-wise 'distance' between these two chords
      */
+    //-----------//
+    // getNoLink //
+    //-----------//
+    /**
+     * Report the penalty for a chord with no voice link.
+     *
+     * @return the no-link penalty
+     */
+    public int getNoLink ()
+    {
+        return noLink;
+    }
+
+    //------//
+    // tune //
+    //------//
+    /**
+     * Use other penalty values, to try another voice mapping.
+     *
+     * @param noLink      penalty for no voice link
+     * @param stemDiffTwo penalty for chords with opposite stems
+     * @param staffDiff   penalty for chords from different staves
+     * @return this instance
+     */
+    public VoiceDistance tune (int noLink,
+                               int stemDiffTwo,
+                               int staffDiff)
+    {
+        this.noLink = noLink;
+        this.stemDiffTwo = stemDiffTwo;
+        this.staffDiff = staffDiff;
+
+        return this;
+    }
+
     public abstract int getDistance (AbstractChordInter left,
                                      AbstractChordInter right,
                                      StringBuilder details);
@@ -188,6 +232,8 @@ public abstract class VoiceDistance
         public Merged (Scale scale)
         {
             super(scale);
+            stemDiffTwo = STEM_2_DIFF;
+            staffDiff = STAFF_DIFF;
         }
 
         private String detailsOf (int dStaff,
@@ -233,10 +279,10 @@ public abstract class VoiceDistance
 
             // Stem direction difference
             int dif = Math.abs(right.getStemDir() - left.getStemDir());
-            int dStem = (dif == 2) ? STEM_2_DIFF : ((dif == 1) ? STEM_1_DIFF : 0);
+            int dStem = (dif == 2) ? stemDiffTwo : ((dif == 1) ? STEM_1_DIFF : 0);
 
             // Different staves?
-            int dStaff = (right.getTopStaff() != left.getTopStaff()) ? STAFF_DIFF : 0;
+            int dStaff = (right.getTopStaff() != left.getTopStaff()) ? staffDiff : 0;
 
             // Penalty for a chord which originated in a different staff
             int nis = (left.getVoice().getStartingStaff() != right.getTopStaff()) ? NEW_IN_STAFF
@@ -292,6 +338,8 @@ public abstract class VoiceDistance
         public Separated (Scale scale)
         {
             super(scale);
+            stemDiffTwo = STEM_2_DIFF;
+            staffDiff = STAFF_DIFF;
         }
 
         private String detailsOf (int dStaff,
@@ -344,7 +392,7 @@ public abstract class VoiceDistance
                         return INCOMPATIBLE;
                     }
 
-                    dStaff = STAFF_DIFF;
+                    dStaff = staffDiff;
                 }
             }
 
@@ -389,7 +437,7 @@ public abstract class VoiceDistance
 
             // Stem direction difference
             int dif = Math.abs(right.getStemDir() - left.getStemDir());
-            int dStem = (dif == 2) ? STEM_2_DIFF : ((dif == 1) ? STEM_1_DIFF : 0);
+            int dStem = (dif == 2) ? stemDiffTwo : ((dif == 1) ? STEM_1_DIFF : 0);
 
             final int d = dStem + dStaff + nis + nar + dp;
 
