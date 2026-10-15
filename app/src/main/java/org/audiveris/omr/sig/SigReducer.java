@@ -2173,15 +2173,31 @@ public class SigReducer
                     : ((topGrade >= (2 * bottomGrade)) ? bottomHeads : null);
 
             if (weakHeads != null) {
-                for (Inter head : weakHeads) {
-                    if (stem.isVip() || head.isVip()) {
-                        logger.info("VIP cutting weak end relation between {} and {}", stem, head);
-                    }
+                // A real head cannot lie close to the stem end opposite to its chord heads
+                // (a stem extends well beyond its last head), unlike a head of a wide chord
+                final double topY = Math.min(stemLine.getY1(), stemLine.getY2());
+                final double bottomY = Math.max(stemLine.getY1(), stemLine.getY2());
+                final double maxDy = constants.maxWeakHeadDyFromStemEnd.getValue()
+                        * scale.getInterline();
+                boolean cut = false;
 
-                    sig.removeEdge(sig.getRelation(head, stem, HeadStemRelation.class));
+                for (Inter head : weakHeads) {
+                    final double y = head.getCenter2D().getY();
+                    final double dy = (weakHeads == topHeads) ? (y - topY) : (bottomY - y);
+
+                    if (dy <= maxDy) {
+                        if (stem.isVip() || head.isVip()) {
+                            logger.info("VIP cutting weak end relation {} {}", stem, head);
+                        }
+
+                        sig.removeEdge(sig.getRelation(head, stem, HeadStemRelation.class));
+                        cut = true;
+                    }
                 }
 
-                return false;
+                if (cut) {
+                    return false;
+                }
             }
         }
 
@@ -2428,6 +2444,10 @@ public class SigReducer
     private static class Constants
             extends ConstantSet
     {
+        private final Constant.Ratio maxWeakHeadDyFromStemEnd = new Constant.Ratio(
+                1.5,
+                "Maximum distance (in interlines) from stem end for a weak head to be cut");
+
         private final Scale.Fraction maxTupletSlurWidth = new Scale.Fraction(
                 3,
                 "Maximum width for slur around tuplet");
