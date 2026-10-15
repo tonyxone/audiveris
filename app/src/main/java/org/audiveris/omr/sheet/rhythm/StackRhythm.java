@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -159,7 +160,10 @@ public class StackRhythm
         }
 
         if (bestTuning != null) {
-            logger.debug("{} rhythm improved by voice tuning {}", stack, bestTuning);
+            logger.debug(
+                    "{} rhythm improved by voice tuning {}",
+                    stack,
+                    Arrays.toString(bestTuning));
         }
 
         return best == 0;
