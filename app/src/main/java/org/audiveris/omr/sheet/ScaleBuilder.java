@@ -453,6 +453,52 @@ public class ScaleBuilder
         return doRetrieveScale(false);
     }
 
+    //---------------------//
+    // getUpscalingFactor //
+    //---------------------//
+    /**
+     * Probe the main interline, to detect a picture whose resolution is too low but which
+     * could be processed once upscaled.
+     *
+     * @return the integer upscaling factor to apply, or null if no upscaling is needed or possible
+     */
+    public Integer getUpscalingFactor ()
+    {
+        final Integer specifiedInterline = sheet.getStub().getInterlineSpecification();
+
+        if ((specifiedInterline != null) && (specifiedInterline != 0)) {
+            return null;
+        }
+
+        try {
+            binary = sheet.getPicture().getVerticalTable(Picture.TableKey.BINARY);
+            histoKeeper = new HistoKeeper();
+            histoKeeper.buildBlacks();
+            histoKeeper.buildCombos();
+            histoKeeper.retrieveInterlinePeaks();
+        } catch (StepException ex) {
+            return null; // Let the standard processing report the problem
+        }
+
+        final int interline = comboPeak.main;
+
+        if ((interline >= constants.minInterline.getValue())
+                || (interline < constants.minUpscaledInterline.getValue())) {
+            return null;
+        }
+
+        final int factor = Math.max(
+                2,
+                (int) Math.round(constants.targetInterline.getValue() / (double) interline));
+        final long pixels = (long) sheet.getWidth() * sheet.getHeight() * factor * factor;
+
+        if (pixels > constants.maxUpscaledPixelCount.getValue()) {
+            return null;
+        }
+
+        return factor;
+    }
+
     //~ Static Methods -----------------------------------------------------------------------------
 
     //-----------------//
@@ -485,6 +531,21 @@ public class ScaleBuilder
                 "Pixels",
                 100,
                 "Maximum interline value (in pixels)");
+
+        private final Constant.Integer minUpscaledInterline = new Constant.Integer(
+                "Pixels",
+                5,
+                "Minimum interline value (in pixels) for a too-low resolution picture to be upscaled");
+
+        private final Constant.Integer targetInterline = new Constant.Integer(
+                "Pixels",
+                20,
+                "Target interline value (in pixels) when upscaling a too-low resolution picture");
+
+        private final Constant.Integer maxUpscaledPixelCount = new Constant.Integer(
+                "Pixels",
+                20_000_000,
+                "Maximum pixel count of an upscaled picture");
 
         private final Constant.Ratio minGainRatio = new Constant.Ratio(
                 0.03,
