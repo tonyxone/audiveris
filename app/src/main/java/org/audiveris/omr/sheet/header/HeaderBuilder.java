@@ -21,6 +21,7 @@
 // </editor-fold>
 package org.audiveris.omr.sheet.header;
 
+import org.audiveris.omr.constant.Constant;
 import org.audiveris.omr.constant.ConstantSet;
 import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.sheet.Scale;
@@ -33,6 +34,7 @@ import org.audiveris.omr.sheet.time.HeaderTimeColumn;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.BarlineInter;
 import org.audiveris.omr.sig.inter.ClefInter;
+import org.audiveris.omr.sig.inter.KeyInter;
 import org.audiveris.omr.sig.relation.BarGroupRelation;
 import org.audiveris.omr.sig.relation.Relation;
 import org.audiveris.omr.ui.Colors;
@@ -48,6 +50,8 @@ import org.jfree.data.xy.XYSeries;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Class <code>HeaderBuilder</code> handles the header at the beginning of a given system.
@@ -104,7 +108,7 @@ public class HeaderBuilder
     private final KeyColumn keyColumn;
 
     /** Manager for column of time signatures. */
-    private final HeaderTimeColumn timeColumn;
+    private HeaderTimeColumn timeColumn;
 
     //~ Constructors -------------------------------------------------------------------------------
 
@@ -281,6 +285,11 @@ public class HeaderBuilder
 
         // Retrieve header time-sigs
         int timeOffset = timeColumn.retrieveTime();
+
+        if (!hasTime() && (clefOffset > 0) && (keyOffset > 0) && hasOnlyWeakKeys()) {
+            timeOffset = retrieveTimeOverWeakKeys(clefOffset, keyOffset);
+        }
+
         setSystemTimeStop(timeOffset);
 
         // We should be able now to select the best clef for each staff
@@ -291,6 +300,112 @@ public class HeaderBuilder
 
         // Freeze header inters
         freezeHeaders();
+    }
+
+    //---------//
+    // hasTime //
+    //---------//
+    /**
+     * Report whether a time-sig has been found in some staff header of the system.
+     *
+     * @return true if so
+     */
+    private boolean hasTime ()
+    {
+        for (Staff staff : system.getStaves()) {
+            if (!staff.isTablature() && (staff.getHeader().time != null)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    //-----------------//
+    // hasOnlyWeakKeys //
+    //-----------------//
+    /**
+     * Report whether every key-sig found in system header is weak.
+     *
+     * @return true if there is at least one header key and all of them are weak
+     */
+    private boolean hasOnlyWeakKeys ()
+    {
+        boolean found = false;
+
+        for (Staff staff : system.getStaves()) {
+            if (!staff.isTablature()) {
+                final KeyInter key = staff.getHeader().key;
+
+                if (key != null) {
+                    if (key.getGrade() >= constants.maxWeakKeyGrade.getValue()) {
+                        return false;
+                    }
+
+                    found = true;
+                }
+            }
+        }
+
+        return found;
+    }
+
+    //--------------------------//
+    // retrieveTimeOverWeakKeys //
+    //--------------------------//
+    /**
+     * Retry the time-sig lookup right after the clefs, ignoring the weak key-sigs found.
+     * <p>
+     * A time-sig digit (e.g. a '3') can be taken for a single key alter (e.g. a flat).
+     * The time lookup then starts after this fake key and finds nothing.
+     * If a time-sig is found where the keys were, these keys are discarded.
+     *
+     * @param clefOffset ending abscissa offset of clefs
+     * @param keyOffset  ending abscissa offset of keys
+     * @return ending abscissa offset of time-sig column, or -1 if still none
+     */
+    private int retrieveTimeOverWeakKeys (int clefOffset,
+                                          int keyOffset)
+    {
+        setSystemKeyStop(clefOffset);
+        final Map<Staff, StaffHeader.Range> oldRanges = new HashMap<>();
+
+        for (Staff staff : system.getStaves()) {
+            if (!staff.isTablature()) {
+                oldRanges.put(staff, staff.getHeader().timeRange);
+                staff.getHeader().timeRange = null; // Else the former browse range is reused
+            }
+        }
+
+        final HeaderTimeColumn column = new HeaderTimeColumn(system);
+        final int timeOffset = column.retrieveTime();
+
+        if ((timeOffset == -1) || !hasTime()) {
+            // Restore
+            setSystemKeyStop(keyOffset);
+            oldRanges.forEach((staff, range) -> staff.getHeader().timeRange = range);
+
+            return -1;
+        }
+
+        for (Staff staff : system.getStaves()) {
+            if (!staff.isTablature()) {
+                final StaffHeader header = staff.getHeader();
+
+                if (header.key != null) {
+                    logger.info("Staff#{} weak {} discarded for time-sig", staff.getId(), header.key);
+                    header.key.remove();
+                    header.key = null;
+                }
+
+                header.keyRange = null;
+                header.alterStarts = null;
+            }
+        }
+
+        timeColumn = column;
+
+        return timeOffset;
     }
 
     //---------------//
@@ -389,5 +504,9 @@ public class HeaderBuilder
         private final Scale.Fraction maxHeaderWidth = new Scale.Fraction(
                 15.0,
                 "Maximum header width (from measure start to end of key-sig or time-sig)");
+
+        private final Constant.Ratio maxWeakKeyGrade = new Constant.Ratio(
+                0.3,
+                "Maximum grade for a header key-sig to be challenged by a time-sig");
     }
 }
