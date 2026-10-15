@@ -102,7 +102,7 @@ jobs:
             [ "$key" = "$prefix$NAME" ] && continue
             # Metadata only: a plain mv also copies tags, which builds don't
             # carry and the publishing role may not read.
-            aws s3 mv "s3://$bucket/$key" "s3://$bucket/${prefix}archive/${key#"$prefix"}"               --copy-props metadata-directive
+            aws s3 mv "s3://$bucket/$key" "s3://$bucket/${prefix}archive/${key#"$prefix"}" --copy-props metadata-directive
             echo "Archived: ${key#"$prefix"}" >> "$GITHUB_STEP_SUMMARY"
           done
           echo "Published: $FOLDER$NAME" >> "$GITHUB_STEP_SUMMARY"
