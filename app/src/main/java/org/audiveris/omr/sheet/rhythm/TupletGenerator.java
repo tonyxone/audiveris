@@ -129,7 +129,8 @@ public class TupletGenerator
         for (AbstractChordInter ch : voice.getChords()) {
             final Rational time = ch.getTimeOffset();
 
-            if (time.compareTo(nextTime) >= 0) {
+            // A chord with no time offset yet just stays in the current group
+            if ((time != null) && (time.compareTo(nextTime) >= 0)) {
                 nextTime = nextTime.plus(rawDuration);
                 groups.add(currentGroup = new ArrayList<>());
             }
@@ -240,6 +241,17 @@ public class TupletGenerator
 
                 created.addAll(forceTuplets(voice));
                 logger.debug("{} {} rechecked with implicit tuplets", measure, voice);
+            } else {
+                final List<TupletInter> partial = findPartialTuplets(voice, expected);
+
+                if (!partial.isEmpty()) {
+                    if (created == null) {
+                        created = new ArrayList<>();
+                    }
+
+                    created.addAll(partial);
+                    logger.debug("{} {} rechecked with partial implicit tuplets", measure, voice);
+                }
             }
         }
 
@@ -248,6 +260,116 @@ public class TupletGenerator
         }
 
         return created;
+    }
+
+    //--------------------//
+    // findPartialTuplets //
+    //--------------------//
+    /**
+     * Inspect a voice in which only some beam groups would be tuplets.
+     * <p>
+     * A typical case is a voice mixing (unmarked) triplet eighths with plain quarters.
+     * Each beam group of 3 (or 6) chords of equal duration, not already in a tuplet, is a
+     * candidate. If shrinking all these candidates by 2/3 removes exactly the voice excess
+     * beyond the measure expected duration, an implicit tuplet is generated for each of them.
+     *
+     * @param voice    the voice to inspect
+     * @param expected the measure expected duration
+     * @return the collection of tuplet signs created, perhaps empty
+     */
+    private List<TupletInter> findPartialTuplets (Voice voice,
+                                                  Rational expected)
+    {
+        final List<AbstractChordInter> chords = voice.getChords();
+        final AbstractChordInter first = chords.get(0);
+
+        if (first.getTimeOffset() == null) {
+            return Collections.emptyList();
+        }
+
+        // Voice end, ignoring implicit tuplets (which are about to be removed)
+        Rational end = first.getTimeOffset();
+        final List<BeamGroupInter> candidates = new ArrayList<>();
+        Rational saving = Rational.ZERO;
+
+        for (AbstractChordInter ch : chords) {
+            final TupletInter tuplet = ch.getTuplet();
+            final Rational dur = ((tuplet != null) && !tuplet.isImplicit()) ? ch.getDuration()
+                    : ch.getDurationSansTuplet();
+
+            if (dur == null) {
+                return Collections.emptyList();
+            }
+
+            end = end.plus(dur);
+
+            final BeamGroupInter bg = ch.getBeamGroup();
+
+            if ((bg != null) && !candidates.contains(bg) && isTupletCandidate(bg, voice)) {
+                candidates.add(bg);
+
+                for (AbstractChordInter c : bg.getChords()) {
+                    saving = saving.plus(c.getDurationSansTuplet().divides(3));
+                }
+            }
+        }
+
+        final Rational excess = end.minus(expected);
+
+        if (candidates.isEmpty() || (excess.compareTo(Rational.ZERO) <= 0)
+                || !excess.equals(saving)) {
+            return Collections.emptyList();
+        }
+
+        final List<TupletInter> created = new ArrayList<>();
+
+        for (BeamGroupInter bg : candidates) {
+            final List<AbstractChordInter> group = new ArrayList<>(bg.getChords());
+            Collections.sort(group, Inters.byCenterAbscissa);
+            created.add(generateOneTuplet(group));
+        }
+
+        return created;
+    }
+
+    //-------------------//
+    // isTupletCandidate //
+    //-------------------//
+    /**
+     * Check whether a beam group could be an implicit tuplet: all its chords in the
+     * provided voice, 3 or 6 of them, of equal duration and without any tuplet yet.
+     *
+     * @param bg    the beam group
+     * @param voice the containing voice
+     * @return true if so
+     */
+    private boolean isTupletCandidate (BeamGroupInter bg,
+                                       Voice voice)
+    {
+        final List<AbstractChordInter> bgChords = bg.getChords();
+        final int size = bgChords.size();
+
+        if ((size != 3) && (size != 6)) {
+            return false;
+        }
+
+        Rational dur = null;
+
+        for (AbstractChordInter c : bgChords) {
+            if ((c.getVoice() != voice) || (c.getTuplet() != null && !c.getTuplet().isImplicit())) {
+                return false;
+            }
+
+            final Rational d = c.getDurationSansTuplet();
+
+            if ((d == null) || ((dur != null) && !dur.equals(d))) {
+                return false;
+            }
+
+            dur = d;
+        }
+
+        return true;
     }
 
     //--------------//

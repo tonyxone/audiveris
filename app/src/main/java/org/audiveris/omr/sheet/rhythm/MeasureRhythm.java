@@ -598,6 +598,8 @@ public class MeasureRhythm
 
                     if (!newImplicits.isEmpty()) {
                         // Run pass #2 with the new implicits generated on measure-long voices
+                        // (an existing implicit tuplet may have been reused as a new one)
+                        oldImplicits.removeAll(newImplicits);
                         removeTuplets(oldImplicits);
                         continue;
                     }
