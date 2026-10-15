@@ -29,6 +29,8 @@ import org.audiveris.omr.glyph.GlyphFactory;
 import org.audiveris.omr.glyph.GlyphGroup;
 import static org.audiveris.omr.glyph.GlyphGroup.SYMBOL;
 import org.audiveris.omr.glyph.GlyphIndex;
+import org.audiveris.omr.glyph.Grades;
+import org.audiveris.omr.glyph.ShapeSet;
 import org.audiveris.omr.image.ImageUtil;
 import static org.audiveris.omr.image.PixelSource.BACKGROUND;
 import static org.audiveris.omr.image.PixelSource.FOREGROUND;
@@ -42,11 +44,13 @@ import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.SystemManager;
+import org.audiveris.omr.sheet.note.NoteHeadsBuilder;
 import org.audiveris.omr.sheet.ui.ImageView;
 import org.audiveris.omr.sheet.ui.PixelBoard;
 import org.audiveris.omr.sheet.ui.ScrollImageView;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.AbstractBeamInter;
+import org.audiveris.omr.sig.inter.HeadChordInter;
 import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.LyricItemInter;
@@ -308,6 +312,44 @@ public class SymbolsFilter
             return super.canHide(inter);
         }
 
+        //-----------------------//
+        // isBoostedStemLessHead //
+        //-----------------------//
+        /**
+         * Report whether the inter is a stemless head whose own match, before
+         * NoteHeadsBuilder's stem-less boost, is too weak to hide its pixels, or a chord
+         * made only of such heads.
+         *
+         * @param inter the inter to check
+         * @return true for such a head
+         */
+        private static boolean isBoostedStemLessHead (Inter inter)
+        {
+            // Heads are erased through their chord
+            if (inter instanceof HeadChordInter chord) {
+                final List<? extends Inter> notes = chord.getNotes();
+
+                return !notes.isEmpty() && notes.stream().allMatch(
+                        SymbolsCleaner::isBoostedStemLessHead);
+            }
+
+            if (!(inter instanceof HeadInter) || !ShapeSet.StemLessHeads.contains(inter.getShape())) {
+                return false;
+            }
+
+            final double boost = NoteHeadsBuilder.getStemLessBoost();
+            final double ratio = Grades.intrinsicRatio;
+            final double grade = inter.getGrade();
+
+            if ((boost <= 0) || (boost >= 1) || (grade >= ratio)) {
+                return false;
+            }
+
+            final double unboosted = (grade - (boost * ratio)) / (1 - boost);
+
+            return unboosted < constants.minHeadContextualGrade.getValue();
+        }
+
         //-------------//
         // eraseInters //
         //-------------//
@@ -370,6 +412,14 @@ public class SymbolsFilter
 
                     // Sentences are handled via their words
                     if (inter instanceof SentenceInter) {
+                        continue;
+                    }
+
+                    // A stemless head kept only thanks to its stem-less boost is left in place.
+                    // A whole-head template also fits the round top of an F clef: erasing those
+                    // pixels, even as an optional glyph, splits the clef in two and it is never
+                    // recognized. Left whole, the clef is, and SigReducer then prefers it.
+                    if (isBoostedStemLessHead(inter)) {
                         continue;
                     }
 

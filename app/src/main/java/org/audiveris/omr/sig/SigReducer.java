@@ -46,6 +46,7 @@ import org.audiveris.omr.sig.inter.BarlineInter;
 import org.audiveris.omr.sig.inter.BeamGroupInter;
 import org.audiveris.omr.sig.inter.BeamHookInter;
 import org.audiveris.omr.sig.inter.BeamInter;
+import org.audiveris.omr.sig.inter.ClefInter;
 import org.audiveris.omr.sig.inter.EnsembleHelper;
 import org.audiveris.omr.sig.inter.FretInter;
 import org.audiveris.omr.sig.inter.HeadChordInter;
@@ -1465,12 +1466,30 @@ public class SigReducer
             return;
         }
 
+        // A clef recognized on the pixels of a stemless head: an F clef's round top fits a
+        // whole-head template, and a head admitted there only thanks to its stem-less boost
+        // would otherwise win and take the clef change away. A real whole head never lies
+        // within a clef, so the head gives way.
+        if ((left instanceof ClefInter) && isStemLessHead(right)) {
+            right.decrease(1.0);
+        } else if ((right instanceof ClefInter) && isStemLessHead(left)) {
+            left.decrease(1.0);
+        }
+
         // If there is no support between left & right, insert an exclusion
         final SIGraph leftSig = left.getSig();
 
         if (leftSig.noSupport(left, right)) {
             leftSig.insertExclusion(left, right, OVERLAP);
         }
+    }
+
+    //----------------//
+    // isStemLessHead //
+    //----------------//
+    private static boolean isStemLessHead (Inter inter)
+    {
+        return (inter instanceof HeadInter) && ShapeSet.StemLessHeads.contains(inter.getShape());
     }
 
     //---------------------//
