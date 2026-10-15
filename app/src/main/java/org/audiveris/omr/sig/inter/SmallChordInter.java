@@ -155,6 +155,10 @@ public class SmallChordInter
     {
         if (staff == null) {
             staff = system.getClosestStaff(headCenter);
+
+            if (staff == null) {
+                return null;
+            }
         }
 
         final Scale scale = system.getSheet().getScale();
