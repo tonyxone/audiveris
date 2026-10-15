@@ -49,6 +49,18 @@ public class StackRhythm
 
     private static final Logger logger = LoggerFactory.getLogger(StackRhythm.class);
 
+    /**
+     * Alternative voice penalties {noLink, stemDiffTwo, staffDiff}, tried in turn on a stack
+     * whose rhythm is not correct with the standard ones (60, 6, 20).
+     * They favor voices following stem direction, or staying in their staff, or new voices.
+     */
+    private static final int[][] VOICE_TUNINGS = {
+            { 60, 40, 20 },
+            { 60, 6, 60 },
+            { 60, 40, 60 },
+            { 30, 6, 20 },
+            { 100, 6, 20 } };
+
     //~ Instance fields ----------------------------------------------------------------------------
 
     /** The dedicated measure stack. */
@@ -118,26 +130,73 @@ public class StackRhythm
      */
     private boolean doProcess ()
     {
-        stack.resetRhythm();
+        int best = doProcess(null);
 
-        boolean stackOk = true;
+        if (best == 0) {
+            return true;
+        }
+
+        // Some measure is not correct, try other voice penalties
+        int[] bestTuning = null;
+        int[] lastTuning = null;
+
+        for (int[] tuning : VOICE_TUNINGS) {
+            final int count = doProcess(tuning);
+            lastTuning = tuning;
+
+            if (count < best) {
+                best = count;
+                bestTuning = tuning;
+
+                if (count == 0) {
+                    break;
+                }
+            }
+        }
+
+        if (lastTuning != bestTuning) {
+            doProcess(bestTuning); // Restore the best attempt
+        }
+
+        if (bestTuning != null) {
+            logger.debug("{} rhythm improved by voice tuning {}", stack, bestTuning);
+        }
+
+        return best == 0;
+    }
+
+    /**
+     * Process the stack rhythm with the provided voice penalties.
+     *
+     * @param tuning the specific voice penalties, or null for the standard ones
+     * @return the number of abnormal measures
+     */
+    private int doProcess (int[] tuning)
+    {
+        stack.resetRhythm();
 
         // Process measure by measure
         for (Measure measure : stack.getMeasures()) {
-            final boolean measureOk = new MeasureRhythm(measure).process();
+            final boolean measureOk = new MeasureRhythm(measure, tuning).process();
 
             if (!measureOk) {
                 measure.setAbnormal(true);
             }
-
-            stackOk &= measureOk;
         }
 
         generateStackSlots(); // Gather all chords into stack slots
 
         readStackActualDuration(); // Read stack actual duration
 
-        return stackOk;
+        int abnormals = 0;
+
+        for (Measure measure : stack.getMeasures()) {
+            if (measure.isAbnormal()) {
+                abnormals++;
+            }
+        }
+
+        return abnormals;
     }
 
     //--------------------//

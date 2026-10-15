@@ -2148,6 +2148,43 @@ public class SigReducer
         final Line2D stemLine = stem.computeExtendedLine();
         final int stemDir = stem.computeDirection();
 
+        // With heads on both stem halves, the clearly stronger half wins
+        // (e.g. weak fake heads found on the beams at the top of grace notes stems)
+        final double midY = (stemLine.getY1() + stemLine.getY2()) / 2;
+        final List<Inter> topHeads = new ArrayList<>();
+        final List<Inter> bottomHeads = new ArrayList<>();
+        double topGrade = 0;
+        double bottomGrade = 0;
+
+        for (Relation rel : sig.getRelations(stem, HeadStemRelation.class)) {
+            final Inter head = sig.getEdgeSource(rel);
+
+            if (head.getCenter2D().getY() < midY) {
+                topHeads.add(head);
+                topGrade = Math.max(topGrade, head.getGrade());
+            } else {
+                bottomHeads.add(head);
+                bottomGrade = Math.max(bottomGrade, head.getGrade());
+            }
+        }
+
+        if ((topGrade > 0) && (bottomGrade > 0)) {
+            final List<Inter> weakHeads = (bottomGrade >= (2 * topGrade)) ? topHeads
+                    : ((topGrade >= (2 * bottomGrade)) ? bottomHeads : null);
+
+            if (weakHeads != null) {
+                for (Inter head : weakHeads) {
+                    if (stem.isVip() || head.isVip()) {
+                        logger.info("VIP cutting weak end relation between {} and {}", stem, head);
+                    }
+
+                    sig.removeEdge(sig.getRelation(head, stem, HeadStemRelation.class));
+                }
+
+                return false;
+            }
+        }
+
         if (stemDir == 0) {
             return true; // We cannot decide
         }

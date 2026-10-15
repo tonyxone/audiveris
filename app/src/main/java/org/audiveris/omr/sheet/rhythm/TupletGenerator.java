@@ -266,12 +266,16 @@ public class TupletGenerator
     // findPartialTuplets //
     //--------------------//
     /**
-     * Inspect a voice in which only some beam groups would be tuplets.
+     * Inspect a voice in which only some chord groups would be tuplets.
      * <p>
      * A typical case is a voice mixing (unmarked) triplet eighths with plain quarters.
-     * Each beam group of 3 (or 6) chords of equal duration, not already in a tuplet, is a
-     * candidate. If shrinking all these candidates by 2/3 removes exactly the voice excess
-     * beyond the measure expected duration, an implicit tuplet is generated for each of them.
+     * Candidates are the beam groups of 3 (or 6) chords of equal duration, not already in a
+     * tuplet, and the "free" triples: 3 consecutive non-beamed chords (rests or flagged notes)
+     * of equal duration, starting on a beat (for example a triplet whose sign was missed).
+     * <p>
+     * If shrinking a set of candidates by 2/3 removes exactly the voice excess beyond the measure
+     * expected duration, an implicit tuplet is generated for each of them.
+     * Beam groups alone are tried first, then beam groups and free triples, then free triples.
      *
      * @param voice    the voice to inspect
      * @param expected the measure expected duration
@@ -289,47 +293,95 @@ public class TupletGenerator
 
         // Voice end, ignoring implicit tuplets (which are about to be removed)
         Rational end = first.getTimeOffset();
-        final List<BeamGroupInter> candidates = new ArrayList<>();
-        Rational saving = Rational.ZERO;
+        final List<List<AbstractChordInter>> beamGroups = new ArrayList<>();
+        final List<List<AbstractChordInter>> freeTriples = new ArrayList<>();
+        final List<BeamGroupInter> seenGroups = new ArrayList<>();
+        final List<AbstractChordInter> run = new ArrayList<>();
+        Rational runDur = null;
 
         for (AbstractChordInter ch : chords) {
             final TupletInter tuplet = ch.getTuplet();
-            final Rational dur = ((tuplet != null) && !tuplet.isImplicit()) ? ch.getDuration()
-                    : ch.getDurationSansTuplet();
+            final boolean explicit = (tuplet != null) && !tuplet.isImplicit();
+            final Rational dur = explicit ? ch.getDuration() : ch.getDurationSansTuplet();
 
             if (dur == null) {
                 return Collections.emptyList();
             }
 
-            end = end.plus(dur);
-
             final BeamGroupInter bg = ch.getBeamGroup();
 
-            if ((bg != null) && !candidates.contains(bg) && isTupletCandidate(bg, voice)) {
-                candidates.add(bg);
+            if (bg != null) {
+                if (!seenGroups.contains(bg)) {
+                    seenGroups.add(bg);
 
-                for (AbstractChordInter c : bg.getChords()) {
-                    saving = saving.plus(c.getDurationSansTuplet().divides(3));
+                    if (isTupletCandidate(bg, voice)) {
+                        final List<AbstractChordInter> group = new ArrayList<>(bg.getChords());
+                        Collections.sort(group, Inters.byCenterAbscissa);
+                        beamGroups.add(group);
+                    }
+                }
+
+                run.clear();
+            } else if (explicit) {
+                run.clear();
+            } else {
+                // Free triple, starting on a beat (a multiple of twice the chord duration)
+                if (!run.isEmpty() && !dur.equals(runDur)) {
+                    run.clear();
+                }
+
+                if (run.isEmpty()) {
+                    if (end.divides(dur.times(2)).den == 1) {
+                        run.add(ch);
+                        runDur = dur;
+                    }
+                } else {
+                    run.add(ch);
+
+                    if (run.size() == 3) {
+                        freeTriples.add(new ArrayList<>(run));
+                        run.clear();
+                    }
                 }
             }
+
+            end = end.plus(dur);
         }
 
         final Rational excess = end.minus(expected);
 
-        if (candidates.isEmpty() || (excess.compareTo(Rational.ZERO) <= 0)
-                || !excess.equals(saving)) {
+        if (excess.compareTo(Rational.ZERO) <= 0) {
             return Collections.emptyList();
         }
 
-        final List<TupletInter> created = new ArrayList<>();
+        final List<List<AbstractChordInter>> both = new ArrayList<>(beamGroups);
+        both.addAll(freeTriples);
 
-        for (BeamGroupInter bg : candidates) {
-            final List<AbstractChordInter> group = new ArrayList<>(bg.getChords());
-            Collections.sort(group, Inters.byCenterAbscissa);
-            created.add(generateOneTuplet(group));
+        for (List<List<AbstractChordInter>> set : List.of(beamGroups, both, freeTriples)) {
+            if (set.isEmpty()) {
+                continue;
+            }
+
+            Rational saving = Rational.ZERO;
+
+            for (List<AbstractChordInter> group : set) {
+                for (AbstractChordInter c : group) {
+                    saving = saving.plus(c.getDurationSansTuplet().divides(3));
+                }
+            }
+
+            if (excess.equals(saving)) {
+                final List<TupletInter> created = new ArrayList<>();
+
+                for (List<AbstractChordInter> group : set) {
+                    created.add(generateOneTuplet(group));
+                }
+
+                return created;
+            }
         }
 
-        return created;
+        return Collections.emptyList();
     }
 
     //-------------------//

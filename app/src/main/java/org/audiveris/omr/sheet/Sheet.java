@@ -61,6 +61,7 @@ import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.AbstractPitchedInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.ui.InterController;
+import org.audiveris.omr.step.BinaryStep;
 import org.audiveris.omr.step.OmrStep;
 import org.audiveris.omr.step.StepException;
 import org.audiveris.omr.ui.BoardsPane;
@@ -89,6 +90,7 @@ import ij.process.ImageProcessor;
 
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
@@ -1436,19 +1438,51 @@ public class Sheet
         }
     }
 
-    //---------------//
-    // upscaleBinary //
-    //---------------//
+    //-----------------//
+    // upscalePicture //
+    //-----------------//
     /**
-     * Replace the sheet picture by an upscaled version of its binary image.
+     * Replace the sheet picture by an upscaled version.
      * <p>
      * This is meant for pictures whose resolution is too low (too small interline).
-     * The binary image is interpolated, then thresholded again, to keep smooth edges.
+     * The original gray image is reloaded, upscaled with bicubic interpolation and binarized
+     * again, which keeps much cleaner symbols than upscaling the binary image.
+     * If the gray image cannot be reloaded, the binary image is interpolated and thresholded.
      *
      * @param factor the integer upscaling factor
      */
-    public void upscaleBinary (int factor)
+    public void upscalePicture (int factor)
     {
+        final BufferedImage gray = stub.loadGrayImage();
+
+        if (gray != null) {
+            try {
+                final BufferedImage source = Picture.adjustImageFormat(gray);
+                final int w = source.getWidth() * factor;
+                final int h = source.getHeight() * factor;
+                final BufferedImage big = new BufferedImage(w, h, BufferedImage.TYPE_BYTE_GRAY);
+                final Graphics2D g = big.createGraphics();
+                g.setRenderingHint(
+                        RenderingHints.KEY_INTERPOLATION,
+                        RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                g.drawImage(source, 0, 0, w, h, null);
+                g.dispose();
+
+                picture = new Picture(this, big, false);
+                BinaryStep.runBinarizationFilter(this);
+                picture.disposeSource(Picture.SourceKey.GRAY);
+                picture.discardImage(Picture.ImageKey.GRAY);
+
+                if (OMR.gui != null) {
+                    createBinaryView();
+                }
+
+                return;
+            } catch (ImageFormatException ex) {
+                logger.warn("Cannot upscale gray image, upscaling binary image instead", ex);
+            }
+        }
+
         final ByteProcessor src = picture.getSource(Picture.SourceKey.BINARY);
         src.setInterpolationMethod(ImageProcessor.BILINEAR);
 

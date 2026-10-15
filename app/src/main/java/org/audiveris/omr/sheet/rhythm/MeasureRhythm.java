@@ -123,6 +123,18 @@ public class MeasureRhythm
      */
     public MeasureRhythm (Measure measure)
     {
+        this(measure, null);
+    }
+
+    /**
+     * Creates a new <code>MeasureRhythm</code> object, with specific voice penalties.
+     *
+     * @param measure the measure to process
+     * @param tuning  if not null, the voice penalties to use: {noLink, stemDiffTwo, staffDiff}
+     */
+    public MeasureRhythm (Measure measure,
+                          int[] tuning)
+    {
         this.measure = measure;
 
         final Part part = measure.getPart();
@@ -130,6 +142,10 @@ public class MeasureRhythm
         final Scale scale = sheet.getScale();
         voiceDistance = part.isMerged() ? new VoiceDistance.Merged(scale)
                 : new VoiceDistance.Separated(scale);
+
+        if (tuning != null) {
+            voiceDistance.tune(tuning[0], tuning[1], tuning[2]);
+        }
         implicitTuplets = sheet.getStub().getProcessingSwitches().getValue(
                 ProcessingSwitch.implicitTuplets);
         tupletGenerator = implicitTuplets ? new TupletGenerator(measure) : null;

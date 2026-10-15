@@ -66,7 +66,7 @@ public class ScaleStep
 
         if (factor != null) {
             logger.info("{} too low resolution, upscaling picture by {}", sheet.getId(), factor);
-            sheet.upscaleBinary(factor);
+            sheet.upscalePicture(factor);
         }
 
         final Scale scale = new ScaleBuilder(sheet).retrieveScale();
