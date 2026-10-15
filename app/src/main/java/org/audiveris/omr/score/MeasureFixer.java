@@ -131,6 +131,11 @@ public class MeasureFixer
             if (!measure.getMeasureRepeats().isEmpty()) {
                 return false;
             }
+
+            // A measure made only of small notes (e.g. a cadenza) has no voice but is not empty
+            if (!measure.getHeadChords().isEmpty()) {
+                return false;
+            }
         }
 
         final Rational actualDuration = stack.getActualDuration();

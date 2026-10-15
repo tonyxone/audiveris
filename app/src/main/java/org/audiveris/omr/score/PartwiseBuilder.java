@@ -2254,6 +2254,19 @@ public class PartwiseBuilder
                 current.endVoice();
             }
 
+            // A measure with no voice at all may still contain small notes (e.g. a cadenza)
+            if (measure.getVoices().isEmpty()) {
+                final List<SmallChordInter> trailing = orphanGraces.get(null);
+
+                if (trailing != null) {
+                    for (SmallChordInter small : trailing) {
+                        processChord(small);
+                    }
+
+                    current.endVoice();
+                }
+            }
+
             // Clefs that occur after time slots, if any
             clefIters.push(null, null);
 
@@ -2588,6 +2601,8 @@ public class PartwiseBuilder
 
             if (voice != null) {
                 current.pmNote.setVoice("" + voice.getId());
+            } else if (chord instanceof SmallChordInter) {
+                current.pmNote.setVoice("1"); // Small notes of a measure with no voice
             } else {
                 logger.warn("No voice for {}", chord);
             }
