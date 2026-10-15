@@ -1,0 +1,112 @@
+name: Publish to BetterMusicSheet
+
+# A published release of this fork becomes the Audiveris that BetterMusicSheet
+# ships: its build goes to the top of the audiveris bucket, where
+# BetterMusicSheet's own release takes the one build it finds, and the build
+# it replaces moves into archive/. Nothing is deployed here - production
+# changes at BetterMusicSheet's next release.
+#
+# Run by hand with another folder (e.g. s3://audiveris/test/) to try the
+# whole thing without touching the build BetterMusicSheet ships.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      folder:
+        description: Folder that holds the one build to ship
+        default: s3://audiveris/test/
+
+permissions:
+  contents: write   # attach the build to the release
+  id-token: write   # OIDC -> AWS
+
+concurrency:
+  group: publish-s3
+  cancel-in-progress: false
+
+env:
+  FOLDER: ${{ inputs.folder || 's3://audiveris/' }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Retrieve Gradle properties
+        uses: BrycensRanch/read-properties-action@v1
+        id: all
+        with:
+          file: gradle.properties
+          all: true
+
+      - name: Setup Java ${{ steps.all.outputs.theMinJavaVersion }}
+        uses: actions/setup-java@v5
+        with:
+          java-version: ${{ steps.all.outputs.theMinJavaVersion }}
+          distribution: zulu
+
+      - name: Build Audiveris
+        run: ./gradlew --no-daemon :app:installDist
+
+      # The same check BetterMusicSheet's worker would fail on, made here
+      # first: Audiveris must start on Linux and read a score through to
+      # MusicXML. Audiveris probes GTK at startup even in batch mode.
+      - name: Read a score with the build
+        run: |
+          sudo apt-get install -y --no-install-recommends libgtk-3-0 > /dev/null
+          java -cp "app/build/install/app/lib/*" Audiveris -batch -export -output smoke \
+            -- data/examples/Dichterliebe01.pdf
+          test -s smoke/Dichterliebe01.mxl
+
+      - name: Package
+        id: package
+        run: |
+          version="${{ github.event.release.tag_name }}"
+          version="${version:-$(git rev-parse --short=7 HEAD)}"
+          name="audiveris-linux-app-fork-${version}.tar.gz"
+          tar czf "$name" -C app/build/install/app/lib .
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "Build: $name ($(git rev-parse HEAD))" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-west-1
+
+      # Up first, then the others moved out, so the folder is never empty;
+      # for the moment in between it holds two, which BetterMusicSheet's
+      # release refuses rather than guessing between.
+      - name: Publish, and archive the build it replaces
+        env:
+          NAME: ${{ steps.package.outputs.name }}
+        run: |
+          location="${FOLDER#s3://}"
+          bucket="${location%%/*}"
+          prefix="${location#"$bucket"}"
+          prefix="${prefix#/}"
+          if aws s3api head-object --bucket "$bucket" --key "$prefix$NAME" > /dev/null 2>&1; then
+            echo "$FOLDER$NAME already exists; a published build is never replaced."
+            exit 1
+          fi
+          aws s3 cp "$NAME" "s3://$bucket/$prefix$NAME" --content-type application/gzip \
+            --metadata "source=${{ github.repository }},commit=${{ github.sha }},ref=${{ github.ref_name }}"
+          others=$(aws s3api list-objects-v2 --bucket "$bucket" --prefix "$prefix" --delimiter / \
+            --query "Contents[?ends_with(Key, '.tar.gz')].Key" --output text)
+          for key in $others; do
+            [ "$key" = None ] && continue
+            [ "$key" = "$prefix$NAME" ] && continue
+            aws s3 mv "s3://$bucket/$key" "s3://$bucket/${prefix}archive/${key#"$prefix"}"
+            echo "Archived: ${key#"$prefix"}" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "Published: $FOLDER$NAME" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attach the build to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "${{ steps.package.outputs.name }}"

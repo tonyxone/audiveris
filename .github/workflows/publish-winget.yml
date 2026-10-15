@@ -1,9 +1,9 @@
 
 name: Publish on Windows repository
 
+# Not on release in this fork: its releases are builds for BetterMusicSheet
+# (publish-s3.yml), not Audiveris releases for the Windows package store.
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     
 permissions:
