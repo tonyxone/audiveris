@@ -538,9 +538,14 @@ public class Book
 
         // Group provided sheets pages into scores
         for (SheetStub stub : stubs) {
-            // An invalid or not-selected or not-yet-processed stub triggers a score break
             if (!validSelectedStubs.contains(stub) || stub.getPageRefs().isEmpty()) {
-                score = null;
+                // An invalid, not-selected or not-yet-processed stub is skipped.
+                // It ends the score in progress only when breakScoreOnMissingSheet is set:
+                // otherwise leaving out one sheet of a book (a picture, a sheet that failed)
+                // would split the book into two scores.
+                if (constants.breakScoreOnMissingSheet.isSet()) {
+                    score = null;
+                }
             } else {
                 for (PageRef pageRef : stub.getPageRefs()) {
                     if ((score == null) || pageRef.isMovementStart()) {
@@ -640,8 +645,7 @@ public class Book
             for (Entry<Score, Path> entry : scoreMap.entrySet()) {
                 final Score score = entry.getKey();
                 final Path scorePath = entry.getValue();
-                final String scoreName = (!isMultiMovement()) ? bookName
-                        : (bookName + OMR.MOVEMENT_EXTENSION + score.getId());
+                final String scoreName = exportName(bookName, theScores, score);
 
                 try {
                     new ScoreExporter(score).export(scorePath, scoreName, sig, compressed);
@@ -1086,6 +1090,32 @@ public class Book
         return null;
     }
 
+    //------------//
+    // exportName //
+    //------------//
+    /**
+     * Report the export name of a score among the scores being exported.
+     * <p>
+     * The movement number is the score rank in <code>theScores</code>, not its id: an export
+     * may use its own list of scores, outside the book scores, and there every score id is null.
+     * Two movements would then both be named "BOOK.mvtnull" and the second overwrite the first.
+     *
+     * @param bookName  the book name
+     * @param theScores the scores being exported
+     * @param score     the score to name
+     * @return "BOOK" for a single score, "BOOK.mvt#" otherwise
+     */
+    private static String exportName (String bookName,
+                                      List<Score> theScores,
+                                      Score score)
+    {
+        if (theScores.size() <= 1) {
+            return bookName;
+        }
+
+        return bookName + OMR.MOVEMENT_EXTENSION + (1 + theScores.indexOf(score));
+    }
+
     //---------------------//
     // getScoreExportPaths //
     //---------------------//
@@ -1112,9 +1142,7 @@ public class Book
         final String ext = compressed ? OMR.COMPRESSED_SCORE_EXTENSION : OMR.SCORE_EXTENSION;
 
         for (Score score : theScores) {
-            final String scoreName = (!isMultiMovement()) ? bookName
-                    : (bookName + OMR.MOVEMENT_EXTENSION + score.getId());
-            pathMap.put(score, bookPathSansExt.resolveSibling(scoreName + ext));
+            pathMap.put(score, bookPathSansExt.resolveSibling(exportName(bookName, theScores, score) + ext));
         }
 
         return pathMap;
@@ -3099,6 +3127,10 @@ public class Book
         private final Constant.Boolean printWatch = new Constant.Boolean(
                 false,
                 "Should we print out the book stop watch?");
+
+        private final Constant.Boolean breakScoreOnMissingSheet = new Constant.Boolean(
+                false,
+                "Should an invalid or not-selected sheet end the score in progress?");
 
         private final Constant.Boolean processAllStubsInParallel = new Constant.Boolean(
                 false,
