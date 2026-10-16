@@ -132,8 +132,9 @@ public class MeasureFixer
                 return false;
             }
 
-            // A measure made only of small notes (e.g. a cadenza) has no voice but is not empty
-            if (!measure.getHeadChords().isEmpty()) {
+            // A measure made only of small notes (e.g. a cadenza) has no voice but is not empty,
+            // provided these small notes get exported
+            if (PartwiseBuilder.exportsOrphanGraces() && !measure.getHeadChords().isEmpty()) {
                 return false;
             }
         }

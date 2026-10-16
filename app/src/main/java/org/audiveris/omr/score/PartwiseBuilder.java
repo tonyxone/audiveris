@@ -1383,6 +1383,19 @@ public class PartwiseBuilder
                         : factory.createTechnicalUpBow(placement));
     }
 
+    //---------------------//
+    // exportsOrphanGraces //
+    //---------------------//
+    /**
+     * Report whether small chords linked to no standard chord are exported as grace notes.
+     *
+     * @return true if so
+     */
+    public static boolean exportsOrphanGraces ()
+    {
+        return constants.exportOrphanGraces.isSet();
+    }
+
     //-----------------//
     // getOrphanGraces //
     //-----------------//
@@ -1400,6 +1413,10 @@ public class PartwiseBuilder
     private static Map<AbstractChordInter, List<SmallChordInter>> getOrphanGraces (Measure measure)
     {
         final Map<AbstractChordInter, List<SmallChordInter>> map = new LinkedHashMap<>();
+
+        if (!exportsOrphanGraces()) {
+            return map;
+        }
         final Set<AbstractChordInter> linked = new LinkedHashSet<>();
         final List<AbstractChordInter> targets = new ArrayList<>();
 
@@ -3918,6 +3935,10 @@ public class PartwiseBuilder
     private static class Constants
             extends ConstantSet
     {
+        private final Constant.Boolean exportOrphanGraces = new Constant.Boolean(
+                false,
+                "Should small chords linked to no standard chord (cadenza) be exported as graces?");
+
         private final Constant.Integer pageHorizontalMargin = new Constant.Integer(
                 "tenths",
                 80,

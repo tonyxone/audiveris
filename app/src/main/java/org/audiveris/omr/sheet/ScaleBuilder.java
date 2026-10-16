@@ -469,6 +469,10 @@ public class ScaleBuilder
      */
     public Integer getUpscalingFactor ()
     {
+        if (!constants.upscaleLowResolution.isSet()) {
+            return null; // The too-low resolution is reported, for the caller to read again
+        }
+
         final Integer specifiedInterline = sheet.getStub().getInterlineSpecification();
 
         if ((specifiedInterline != null) && (specifiedInterline != 0)) {
@@ -536,6 +540,10 @@ public class ScaleBuilder
                 "Pixels",
                 100,
                 "Maximum interline value (in pixels)");
+
+        private final Constant.Boolean upscaleLowResolution = new Constant.Boolean(
+                false,
+                "Should a too-low resolution picture be upscaled rather than discarded?");
 
         private final Constant.Integer minUpscaledInterline = new Constant.Integer(
                 "Pixels",
