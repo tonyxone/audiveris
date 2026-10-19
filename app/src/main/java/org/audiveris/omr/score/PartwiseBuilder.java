@@ -477,13 +477,21 @@ public class PartwiseBuilder
 
             for (Relation rel : rels) {
                 final OctaveShiftChordRelation oscRel = (OctaveShiftChordRelation) rel;
+                final OctaveShiftInter os = (OctaveShiftInter) sig.getOppositeInter(chord, rel);
 
                 if (oscRel.getSide() != side) {
-                    continue;
+                    // A line over a single chord links it on the LEFT only: the SIG keeps
+                    // one OctaveShiftChordRelation per pair, so the RIGHT one is dropped.
+                    // Its stop belongs after that same chord, or the shift never ends.
+                    final boolean loneChord = side == RIGHT && oscRel.getSide() == LEFT
+                            && os.getChordRelation(RIGHT) == null;
+
+                    if (!loneChord) {
+                        continue;
+                    }
                 }
 
                 // Insert octave-shift element?
-                final OctaveShiftInter os = (OctaveShiftInter) sig.getOppositeInter(chord, rel);
                 OctaveShift octaveShift = null;
                 if (side == RIGHT) {
                     if (os.getExtension(RIGHT) == null) {

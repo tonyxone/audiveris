@@ -21,11 +21,13 @@
 // </editor-fold>
 package org.audiveris.omr.sig.inter;
 
+import org.audiveris.omr.constant.Constant;
 import org.audiveris.omr.constant.ConstantSet;
 import org.audiveris.omr.glyph.Glyph;
 import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.math.PointUtil;
 import org.audiveris.omr.sheet.Part;
+import org.audiveris.omr.sheet.Picture;
 import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.Staff;
@@ -62,6 +64,8 @@ import org.audiveris.omr.util.WrappedBoolean;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import ij.process.ByteProcessor;
 
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -897,15 +901,181 @@ public class OctaveShiftInter
             return null;
         }
 
+        final Sheet sheet = staff.getSystem().getSheet();
+
+        if (isWithinText(glyph, sheet)) {
+            logger.debug("OctaveShift value {} is a character of text, discarded", glyph);
+            return null;
+        }
+
         //TODO: Can we check for presence of a long dashed line???
         //
         final OctaveShiftInter os = new OctaveShiftInter(glyph, shape, null, grade);
-        final Scale scale = staff.getSystem().getSheet().getScale();
+        final Scale scale = sheet.getScale();
         final int lineLg = scale.toPixels(DEFAULT_LINE_LENGTH);
         os.line = new Line2D.Double(center, new Point(center.x + lineLg, center.y));
         os.setStaff(staff);
 
         return os;
+    }
+
+    //--------------//
+    // isWithinText //
+    //--------------//
+    /**
+     * Report whether the candidate value glyph is a character of a line of text rather
+     * than the number of an octave sign.
+     * <p>
+     * An "8" is also a digit of a year in a composer's dates or of a metronome mark, and a
+     * plausible reading of an italic letter. Such a glyph sits in a run of characters of
+     * its own height, while a real octave number stands alone ("va" is shorter, and a
+     * continuation's parentheses make a short run) and is followed by its line, dashed,
+     * dotted or solid, perhaps after "va". Only a glyph showing both signs of text, a long
+     * run and no line, is discarded: a real sign with a note touching it makes a long run,
+     * and a sign over a single note may show hardly any line.
+     *
+     * @param glyph the candidate value glyph
+     * @param sheet the containing sheet
+     * @return true if the glyph is better read as text
+     */
+    private static boolean isWithinText (Glyph glyph,
+                                         Sheet sheet)
+    {
+        final ByteProcessor buf = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
+
+        if (buf == null) {
+            return false;
+        }
+
+        final Rectangle box = glyph.getBounds();
+
+        if (box.width <= 0 || box.height <= 0) {
+            return false;
+        }
+
+        if (textRun(buf, box) < constants.minTextRun.getValue() * box.width) {
+            return false;
+        }
+
+        final int interline = sheet.getScale().getInterline();
+
+        return lineShare(buf, box, interline) < constants.minLineShare.getValue();
+    }
+
+    //---------//
+    // textRun //
+    //---------//
+    /**
+     * Report the width of the run of tall ink the glyph belongs to: the columns, on either
+     * side, whose ink spans most of the glyph height, with gaps no wider than between
+     * characters.
+     */
+    private static int textRun (ByteProcessor buf,
+                                Rectangle box)
+    {
+        final int maxGap = Math.max(2, (int) (0.6 * box.width));
+        final int x1 = box.x + box.width;
+        int right = x1;
+        int left = box.x;
+
+        for (int x = x1 + 1, gap = 0; gap <= maxGap && x < buf.getWidth(); x++) {
+            if (isTallColumn(buf, x, box)) {
+                right = x;
+                gap = 0;
+            } else {
+                gap++;
+            }
+        }
+
+        for (int x = box.x - 1, gap = 0; gap <= maxGap && x >= 0; x--) {
+            if (isTallColumn(buf, x, box)) {
+                left = x;
+                gap = 0;
+            } else {
+                gap++;
+            }
+        }
+
+        return right - left;
+    }
+
+    //--------------//
+    // isTallColumn //
+    //--------------//
+    private static boolean isTallColumn (ByteProcessor buf,
+                                         int x,
+                                         Rectangle box)
+    {
+        final int y0 = Math.max(0, box.y);
+        final int y1 = Math.min(buf.getHeight() - 1, box.y + box.height);
+        int top = -1;
+        int bottom = -1;
+
+        for (int y = y0; y <= y1; y++) {
+            if (buf.get(x, y) == 0) {
+                if (top < 0) {
+                    top = y;
+                }
+
+                bottom = y;
+            }
+        }
+
+        return top >= 0 && (bottom - top + 1) >= 0.7 * box.height;
+    }
+
+    //-----------//
+    // lineShare //
+    //-----------//
+    /**
+     * Report the best share of a window 3 interlines long, starting at most 2.5 glyph widths
+     * right of the glyph, whose columns hold ink on one row band with clear rows just above
+     * and below it - that is, a thin horizontal line, dashed or not.
+     */
+    private static double lineShare (ByteProcessor buf,
+                                     Rectangle box,
+                                     int interline)
+    {
+        final int width = buf.getWidth();
+        final int height = buf.getHeight();
+        final int x1 = box.x + box.width;
+        final int length = 3 * interline;
+        final int clearance = Math.max(2, interline / 4);
+        final int step = Math.max(1, interline / 4);
+        double best = 0;
+
+        for (int r = box.y; r <= box.y + box.height; r++) {
+            if (r - clearance - 1 < 0 || r + clearance + 1 >= height) {
+                continue;
+            }
+
+            for (int s = 0; s <= 2.5 * box.width; s += step) {
+                final int c0 = x1 + s;
+
+                if (c0 + length >= width) {
+                    break;
+                }
+
+                int hits = 0;
+
+                for (int c = c0; c < c0 + length; c++) {
+                    final boolean core = buf.get(c, r - 1) == 0 || buf.get(c, r) == 0
+                            || buf.get(c, r + 1) == 0;
+                    final boolean clear = buf.get(c, r - clearance - 1) != 0
+                            && buf.get(c, r - clearance) != 0
+                            && buf.get(c, r + clearance) != 0
+                            && buf.get(c, r + clearance + 1) != 0;
+
+                    if (core && clear) {
+                        hits++;
+                    }
+                }
+
+                best = Math.max(best, (double) hits / length);
+            }
+        }
+
+        return best;
     }
 
     //~ Inner Classes ------------------------------------------------------------------------------
@@ -919,6 +1089,14 @@ public class OctaveShiftInter
         private final Scale.Fraction minGapFromStaff = new Scale.Fraction(
                 2.0,
                 "Minimum vertical gap from upper or lower staff");
+
+        private final Constant.Ratio minTextRun = new Constant.Ratio(
+                2.8,
+                "Run of tall ink, in value widths, from which the value may be a text character");
+
+        private final Constant.Ratio minLineShare = new Constant.Ratio(
+                0.6,
+                "Share of a short window right of the value that its line must fill");
     }
 
     //--------//
