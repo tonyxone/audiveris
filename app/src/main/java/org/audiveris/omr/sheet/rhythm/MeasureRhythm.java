@@ -135,6 +135,21 @@ public class MeasureRhythm
     public MeasureRhythm (Measure measure,
                           int[] tuning)
     {
+        this(measure, tuning, true);
+    }
+
+    /**
+     * Creates a new <code>MeasureRhythm</code> object, with specific voice penalties, and
+     * possibly no implicit tuplets.
+     *
+     * @param measure  the measure to process
+     * @param tuning   if not null, the voice penalties to use: {noLink, stemDiffTwo, staffDiff}
+     * @param implicit false for no implicit tuplets in this measure, whatever the switch
+     */
+    public MeasureRhythm (Measure measure,
+                          int[] tuning,
+                          boolean implicit)
+    {
         this.measure = measure;
 
         final Part part = measure.getPart();
@@ -146,7 +161,7 @@ public class MeasureRhythm
         if (tuning != null) {
             voiceDistance.tune(tuning[0], tuning[1], tuning[2]);
         }
-        implicitTuplets = sheet.getStub().getProcessingSwitches().getValue(
+        implicitTuplets = implicit && sheet.getStub().getProcessingSwitches().getValue(
                 ProcessingSwitch.implicitTuplets);
         tupletGenerator = implicitTuplets ? new TupletGenerator(measure) : null;
     }
