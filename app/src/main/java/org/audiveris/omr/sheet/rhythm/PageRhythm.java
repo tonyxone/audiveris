@@ -21,11 +21,14 @@
 // </editor-fold>
 package org.audiveris.omr.sheet.rhythm;
 
+import org.audiveris.omr.constant.Constant;
+import org.audiveris.omr.constant.ConstantSet;
 import org.audiveris.omr.math.Rational;
 import org.audiveris.omr.score.Page;
 import org.audiveris.omr.score.PageRef;
 import org.audiveris.omr.score.TimeRational;
 import org.audiveris.omr.sheet.SystemInfo;
+import org.audiveris.omr.sig.inter.AbstractChordInter;
 import org.audiveris.omr.sig.inter.AbstractTimeInter;
 import org.audiveris.omr.sig.inter.AugmentationDotInter;
 import org.audiveris.omr.sig.inter.FlagInter;
@@ -47,7 +50,8 @@ import java.util.List;
  * Class <code>PageRhythm</code> handles rhythm data on a sheet page.
  * <p>
  * Rhythm is governed by time signatures found in staff header, discovered later down the staff, or
- * even inferred from measures content (this feature is no longer implemented).
+ * inferred from measures content where bars agree on a time none of these give (see
+ * {@link #inferTimes}).
  * <p>
  * When the RHYTHMS step is launched, we already have valid information which is no longer called
  * into question: head-chords and beams.
@@ -74,6 +78,8 @@ import java.util.List;
 public class PageRhythm
 {
     //~ Static fields/initializers -----------------------------------------------------------------
+
+    private static final Constants constants = new Constants();
 
     private static final Logger logger = LoggerFactory.getLogger(PageRhythm.class);
 
@@ -246,7 +252,226 @@ public class PageRhythm
 
             // For each range, adjust TS if needed, then process each measure, using StackRhythm 2nd pass
             processRanges();
+
+            // Where the bars agree on a time the page does not show, read them with it
+            inferTimes();
         }
+    }
+
+    //------------//
+    // inferTimes //
+    //------------//
+    /**
+     * Read again, with the time they agree on, runs of bars the time in force does not fit.
+     * <p>
+     * A time signature change can be missed: Merry Christmas Mr. Lawrence turns from 12/8 to
+     * 4/4 mid-line on its second page, and every bar after that was found a third short.
+     * With no time signature read at all, no bar is checked. A run of at least
+     * {@code minInferredRun} bars that each end all their voices at the same duration, and
+     * make up most of the bars around them that the time in force does not fit, says what
+     * the time is.
+     * <p>
+     * Only a shorter time, or one where none was read, is inferred: bars running long are
+     * more often triplets the reading missed, and a run made mostly of tuplets is left alone
+     * for the same reason. Nor is a run after which the time in force fits again at once,
+     * with no time signature read: a time does not change back unannounced, but a misreading
+     * the bars share comes and goes - Clair de lune's 9/8 duplets, read as plain eighths,
+     * made 4/4 bars of five of them.
+     */
+    private void inferTimes ()
+    {
+        final List<MeasureStack> stacks = new ArrayList<>();
+
+        for (SystemInfo system : page.getSystems()) {
+            for (MeasureStack stack : system.getStacks()) {
+                stack.setInferredTime(null);
+
+                if (!stack.isCautionary() && !stack.isMultiRest() && !stack.isFirstHalf()
+                        && !stack.isImplicit()) {
+                    stacks.add(stack);
+                }
+            }
+        }
+
+        final int n = stacks.size();
+        final Rational[] content = new Rational[n];
+        final boolean[] fits = new boolean[n];
+
+        for (int i = 0; i < n; i++) {
+            final MeasureStack stack = stacks.get(i);
+            content[i] = contentDuration(stack);
+            fits[i] = (content[i] != null) && content[i].equals(stack.getExpectedDuration());
+        }
+
+        int i = 0;
+
+        while (i < n) {
+            final Rational expected = stacks.get(i).getExpectedDuration();
+            final Rational dur = content[i];
+
+            if ((dur == null) || fits[i] || !isTimeValue(dur) || ((expected != null) && (dur
+                    .compareTo(expected) >= 0))) {
+                i++;
+                continue;
+            }
+
+            int agree = 0;
+            int last = i;
+
+            for (int j = i; (j < n) && !fits[j]; j++) {
+                if ((j > i) && (stacks.get(j).getTimeSignature() != null)) {
+                    break; // A time signature read there starts a range of its own
+                }
+
+                if (dur.equals(content[j])) {
+                    agree++;
+                    last = j;
+                }
+            }
+
+            final List<MeasureStack> run = stacks.subList(i, last + 1);
+
+            if ((agree >= constants.minInferredRun.getValue()) && (agree >= (constants.minInferredShare
+                    .getValue() * run.size())) && !mostlyTuplets(run) && !resumes(stacks, fits,
+                            last + 1)) {
+                applyTime(new ArrayList<>(run), dur);
+                i = last + 1;
+            } else {
+                i++;
+            }
+        }
+    }
+
+    //-----------//
+    // applyTime //
+    //-----------//
+    private void applyTime (List<MeasureStack> run,
+                            Rational dur)
+    {
+        final TimeRational time = timeOf(dur);
+        logger.info(
+                "{} time {} inferred for {} bars from stack#{}",
+                page,
+                time,
+                run.size(),
+                run.get(0).getIdValue());
+
+        final List<SystemInfo> systems = new ArrayList<>();
+
+        for (MeasureStack stack : run) {
+            stack.setInferredTime(time);
+            new StackRhythm(stack).process(dur);
+
+            if (!systems.contains(stack.getSystem())) {
+                systems.add(stack.getSystem());
+            }
+        }
+
+        for (SystemInfo system : systems) {
+            Voices.refineSystem(system);
+        }
+    }
+
+    //---------//
+    // resumes //
+    //---------//
+    /**
+     * Whether the time in force fits at least 2 of the 3 stacks from index {@code from},
+     * before any time signature read there.
+     */
+    private static boolean resumes (List<MeasureStack> stacks,
+                                    boolean[] fits,
+                                    int from)
+    {
+        int count = 0;
+
+        for (int k = from; (k < stacks.size()) && (k < (from + 3)); k++) {
+            if (stacks.get(k).getTimeSignature() != null) {
+                break;
+            }
+
+            if (fits[k]) {
+                count++;
+            }
+        }
+
+        return count >= 2;
+    }
+
+    //-----------------//
+    // contentDuration //
+    //-----------------//
+    /**
+     * The duration all voices of a stack fit in, or null when some chord got no voice or
+     * time, or the stack holds no slot (only measure-long rests, or nothing).
+     */
+    private static Rational contentDuration (MeasureStack stack)
+    {
+        if (stack.getSlots().isEmpty()) {
+            return null;
+        }
+
+        for (Measure measure : stack.getMeasures()) {
+            for (AbstractChordInter chord : measure.getStandardChords()) {
+                if ((chord.getVoice() == null) || (chord.getTimeOffset() == null)) {
+                    return null;
+                }
+            }
+        }
+
+        final Rational dur = stack.getActualDuration();
+
+        return ((dur == null) || dur.equals(Rational.ZERO)) ? null : dur;
+    }
+
+    //-------------//
+    // isTimeValue //
+    //-------------//
+    /** Whether a duration could be a bar's under some time signature: n/2, n/4, n/8 or
+     * n/16 of a whole note, two whole notes at most. */
+    private static boolean isTimeValue (Rational dur)
+    {
+        return (dur.compareTo(new Rational(2, 1)) <= 0) && (16 % dur.den == 0);
+    }
+
+    //---------------//
+    // mostlyTuplets //
+    //---------------//
+    private static boolean mostlyTuplets (List<MeasureStack> run)
+    {
+        int chords = 0;
+        int tuplets = 0;
+
+        for (MeasureStack stack : run) {
+            for (Measure measure : stack.getMeasures()) {
+                for (AbstractChordInter chord : measure.getStandardChords()) {
+                    chords++;
+
+                    if (chord.getTupletFactor() != null) {
+                        tuplets++;
+                    }
+                }
+            }
+        }
+
+        return 2 * tuplets > chords;
+    }
+
+    //--------//
+    // timeOf //
+    //--------//
+    /** The time signature for a bar duration: in quarters if it can be, else eighths... */
+    private static TimeRational timeOf (Rational dur)
+    {
+        for (int den : new int[] { 4, 8, 2, 16 }) {
+            final Rational beats = dur.times(den);
+
+            if (beats.den == 1) {
+                return new TimeRational(beats.num, den);
+            }
+        }
+
+        return new TimeRational(dur.num, dur.den);
     }
 
     //---------------//
@@ -336,6 +561,22 @@ public class PageRhythm
     }
 
     //~ Inner Classes ------------------------------------------------------------------------------
+
+    //-----------//
+    // Constants //
+    //-----------//
+    private static class Constants
+            extends ConstantSet
+    {
+        private final Constant.Integer minInferredRun = new Constant.Integer(
+                "bars",
+                3,
+                "Minimum count of agreeing bars to infer a time signature");
+
+        private final Constant.Ratio minInferredShare = new Constant.Ratio(
+                0.6,
+                "Minimum share of agreeing bars among the bars not fitting the time in force");
+    }
 
     //-------//
     // Range //
