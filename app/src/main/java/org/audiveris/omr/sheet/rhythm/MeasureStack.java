@@ -25,6 +25,7 @@ import org.audiveris.omr.math.GeoUtil;
 import org.audiveris.omr.math.Rational;
 import org.audiveris.omr.score.Page;
 import org.audiveris.omr.score.Score;
+import org.audiveris.omr.score.TimeRational;
 import org.audiveris.omr.sheet.Part;
 import org.audiveris.omr.sheet.PartBarline;
 import org.audiveris.omr.sheet.Scale;
@@ -150,6 +151,14 @@ public class MeasureStack
     @XmlAttribute(name = "expected")
     @XmlJavaTypeAdapter(Rational.JaxbAdapter.class)
     private Rational expectedDuration;
+
+    /**
+     * Time signature inferred from the bars themselves, where no time signature was read
+     * or the one in force did not fit a run of bars (see PageRhythm).
+     */
+    @XmlAttribute(name = "inferred-time")
+    @XmlJavaTypeAdapter(TimeRational.JaxbAdapter.class)
+    private TimeRational inferredTime;
 
     /**
      * Actual measure stack duration, based on durations of contained chords.
@@ -799,6 +808,19 @@ public class MeasureStack
     public Rational getExpectedDuration ()
     {
         return expectedDuration;
+    }
+
+    //-----------------//
+    // getInferredTime //
+    //-----------------//
+    /**
+     * Report the time signature inferred from the bars, if any.
+     *
+     * @return the inferred time signature, or null
+     */
+    public TimeRational getInferredTime ()
+    {
+        return inferredTime;
     }
 
     //-----------------//
@@ -1952,6 +1974,19 @@ public class MeasureStack
     public void setExpectedDuration (Rational expectedDuration)
     {
         this.expectedDuration = expectedDuration;
+    }
+
+    //-----------------//
+    // setInferredTime //
+    //-----------------//
+    /**
+     * Set the time signature inferred from the bars.
+     *
+     * @param inferredTime the inferred time signature, or null
+     */
+    public void setInferredTime (TimeRational inferredTime)
+    {
+        this.inferredTime = inferredTime;
     }
 
     //--------------//

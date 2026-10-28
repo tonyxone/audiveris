@@ -309,6 +309,12 @@ public class PartwiseBuilder
     /** Current context. */
     private final Current current = new Current();
 
+    /**
+     * Per logical part, across pages: the time signature last exported, and the last one
+     * read on the page - to return to after a run of bars with an inferred time.
+     */
+    private final Map<LogicalPart, TimeRational[]> partTimes = new LinkedHashMap<>();
+
     /** Current flags. */
     private final IsFirst isFirst = new IsFirst();
 
@@ -2154,12 +2160,23 @@ public class PartwiseBuilder
                 processKeys();
 
                 // Insert TimeSignature, if any
-                if (measure.getTimeSignature() != null) {
-                    processTime(measure.getTimeSignature());
-                } else if (isScoreFirstMeasure) {
-                    // We need to insert a time sig!
-                    // TODO
-                    ///processTime(4,4,null);
+                final TimeRational[] times = partTimes.computeIfAbsent(
+                        current.logicalPart,
+                        p -> new TimeRational[2]);
+                final AbstractTimeInter timeSig = measure.getTimeSignature();
+
+                if (timeSig != null) {
+                    processTime(timeSig);
+                    times[0] = times[1] = timeSig.getTimeRational();
+                } else {
+                    // A time inferred from the bars (see PageRhythm), or back to the one read
+                    final TimeRational wanted = (stack.getInferredTime() != null) ? stack
+                            .getInferredTime() : times[1];
+
+                    if ((wanted != null) && !wanted.equals(times[0])) {
+                        processTime(wanted.num, wanted.den, null);
+                        times[0] = wanted;
+                    }
                 }
             }
 
