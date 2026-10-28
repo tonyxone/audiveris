@@ -24,16 +24,20 @@ package org.audiveris.omr.sheet.rhythm;
 import org.audiveris.omr.math.Rational;
 import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sig.inter.AbstractChordInter;
+import org.audiveris.omr.sig.inter.TupletInter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.TreeMap;
 
 /**
@@ -66,6 +70,9 @@ public class StackRhythm
 
     /** The dedicated measure stack. */
     private final MeasureStack stack;
+
+    /** Measures to read without implicit tuplets: they came out short with them. */
+    private final Set<Measure> noImplicit = new LinkedHashSet<>();
 
     //~ Constructors -------------------------------------------------------------------------------
 
@@ -181,7 +188,8 @@ public class StackRhythm
 
         // Process measure by measure
         for (Measure measure : stack.getMeasures()) {
-            final boolean measureOk = new MeasureRhythm(measure, tuning).process();
+            final boolean measureOk = new MeasureRhythm(measure, tuning, !noImplicit.contains(measure))
+                    .process();
 
             if (!measureOk) {
                 measure.setAbnormal(true);
@@ -283,12 +291,179 @@ public class StackRhythm
         stack.setExpectedDuration(expectedDuration);
 
         try {
-            if (!doProcess()) {
+            boolean ok = doProcess();
+
+            if (dropUnfitTuplets()) {
+                ok = doProcess();
+            }
+
+            if (!ok) {
                 logger.info("{}{} no correct rhythm", stack.getSystem().getLogPrefix(), stack);
             }
         } catch (Exception ex) {
             logger.warn("StackRhythm error processing {} {}", stack, ex.toString(), ex);
         }
+    }
+
+    //------------------//
+    // dropUnfitTuplets //
+    //------------------//
+    /**
+     * Drop the tuplets of a measure that comes out short with them and fits the bar
+     * without them.
+     * <p>
+     * A bar shorter than its time is not flagged, so tuplets that are not there go
+     * unnoticed: the implicit triplets inferred over a dotted eighth and three sixteenths of
+     * Für Elise, or a fingering "3" read as a triplet, each took a third off their notes.
+     * When every voice then ends on the bar once the tuplets are dropped, the implicit ones
+     * are not inferred again, and if that is not enough the tuplet signs go too.
+     *
+     * @return true if some measure lost tuplets, and the stack must be read again
+     */
+    private boolean dropUnfitTuplets ()
+    {
+        final Rational expected = stack.getExpectedDuration();
+
+        if ((expected == null) || stack.isImplicit()) {
+            return false;
+        }
+
+        boolean dropped = false;
+
+        for (Measure measure : stack.getMeasures()) {
+            final Set<TupletInter> tuplets = measure.getTuplets();
+
+            if (tuplets.isEmpty() || !isShort(measure, expected)) {
+                continue;
+            }
+
+            final List<TupletInter> implicits = new ArrayList<>();
+
+            for (TupletInter tuplet : tuplets) {
+                if (tuplet.isImplicit()) {
+                    implicits.add(tuplet);
+                }
+            }
+
+            if (!implicits.isEmpty() && fitsWithout(measure, implicits, expected)) {
+                logger.info("{} short with implicit tuplets, read without them", measure);
+                noImplicit.add(measure);
+                dropped = true;
+            } else if (fitsWithout(measure, tuplets, expected)) {
+                logger.info("{} short with tuplets {}, read without them", measure, tuplets);
+                noImplicit.add(measure);
+
+                for (TupletInter tuplet : new ArrayList<>(tuplets)) {
+                    if (!tuplet.isImplicit()) {
+                        tuplet.remove();
+                    }
+                }
+
+                dropped = true;
+            }
+        }
+
+        return dropped;
+    }
+
+    //-------------//
+    // fitsWithout //
+    //-------------//
+    /**
+     * Whether, with the provided tuplets dropped, every voice of a measure ends on or before
+     * its expected duration and one on it, and chords of a slot still start together.
+     */
+    private static boolean fitsWithout (Measure measure,
+                                        Collection<TupletInter> tuplets,
+                                        Rational expected)
+    {
+        Rational longest = null;
+        final Map<AbstractChordInter, Rational> starts = new LinkedHashMap<>();
+
+        for (Voice voice : measure.getVoices()) {
+            if (voice.isMeasureRest()) {
+                continue;
+            }
+
+            final List<AbstractChordInter> chords = voice.getChords();
+
+            if (chords.isEmpty() || (chords.get(0).getTimeOffset() == null)) {
+                return false;
+            }
+
+            Rational end = chords.get(0).getTimeOffset();
+
+            for (AbstractChordInter chord : chords) {
+                final Rational dur = tuplets.contains(chord.getTuplet()) ? chord
+                        .getDurationSansTuplet() : chord.getDuration();
+
+                if (dur == null) {
+                    return false;
+                }
+
+                starts.put(chord, end);
+                end = end.plus(dur);
+            }
+
+            if (end.compareTo(expected) > 0) {
+                return false;
+            }
+
+            if ((longest == null) || (end.compareTo(longest) > 0)) {
+                longest = end;
+            }
+        }
+
+        for (Slot slot : measure.getStack().getSlots()) {
+            Rational time = null;
+
+            for (AbstractChordInter chord : slot.getChords()) {
+                final Rational start = starts.get(chord);
+
+                if (start != null) {
+                    if ((time != null) && !time.equals(start)) {
+                        return false;
+                    }
+
+                    time = start;
+                }
+            }
+        }
+
+        return expected.equals(longest);
+    }
+
+    //---------//
+    // isShort //
+    //---------//
+    /**
+     * Whether every timed voice of a measure ends before its expected duration.
+     */
+    private static boolean isShort (Measure measure,
+                                    Rational expected)
+    {
+        boolean timed = false;
+
+        for (Voice voice : measure.getVoices()) {
+            if (voice.isMeasureRest()) {
+                return false;
+            }
+
+            final AbstractChordInter last = voice.getLastChord();
+            final Rational end = (last != null) ? last.getEndTime() : null;
+
+            if (end == null) {
+                return false;
+            }
+
+            if (end.compareTo(expected) >= 0) {
+                return false;
+            }
+
+            timed = true;
+        }
+
+        return timed;
     }
 
     //-------------------------//
