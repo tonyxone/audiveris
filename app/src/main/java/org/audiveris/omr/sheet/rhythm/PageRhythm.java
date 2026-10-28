@@ -273,7 +273,10 @@ public class PageRhythm
      * <p>
      * Only a shorter time, or one where none was read, is inferred: bars running long are
      * more often triplets the reading missed, and a run made mostly of tuplets is left alone
-     * for the same reason.
+     * for the same reason. Nor is a run after which the time in force fits again at once,
+     * with no time signature read: a time does not change back unannounced, but a misreading
+     * the bars share comes and goes - Clair de lune's 9/8 duplets, read as plain eighths,
+     * made 4/4 bars of five of them.
      */
     private void inferTimes ()
     {
@@ -329,7 +332,8 @@ public class PageRhythm
             final List<MeasureStack> run = stacks.subList(i, last + 1);
 
             if ((agree >= constants.minInferredRun.getValue()) && (agree >= (constants.minInferredShare
-                    .getValue() * run.size())) && !mostlyTuplets(run)) {
+                    .getValue() * run.size())) && !mostlyTuplets(run) && !resumes(stacks, fits,
+                            last + 1)) {
                 applyTime(new ArrayList<>(run), dur);
                 i = last + 1;
             } else {
@@ -366,6 +370,32 @@ public class PageRhythm
         for (SystemInfo system : systems) {
             Voices.refineSystem(system);
         }
+    }
+
+    //---------//
+    // resumes //
+    //---------//
+    /**
+     * Whether the time in force fits at least 2 of the 3 stacks from index {@code from},
+     * before any time signature read there.
+     */
+    private static boolean resumes (List<MeasureStack> stacks,
+                                    boolean[] fits,
+                                    int from)
+    {
+        int count = 0;
+
+        for (int k = from; (k < stacks.size()) && (k < (from + 3)); k++) {
+            if (stacks.get(k).getTimeSignature() != null) {
+                break;
+            }
+
+            if (fits[k]) {
+                count++;
+            }
+        }
+
+        return count >= 2;
     }
 
     //-----------------//
