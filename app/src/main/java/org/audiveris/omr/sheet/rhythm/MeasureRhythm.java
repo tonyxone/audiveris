@@ -21,6 +21,7 @@
 // </editor-fold>
 package org.audiveris.omr.sheet.rhythm;
 
+import org.audiveris.omr.constant.ConstantSet;
 import org.audiveris.omr.math.Rational;
 import static org.audiveris.omr.math.Rational.THREE_OVER_TWO;
 import static org.audiveris.omr.math.Rational.TWO_OVER_THREE;
@@ -90,6 +91,8 @@ import static java.util.stream.Collectors.toList;
 public class MeasureRhythm
 {
     //~ Static fields/initializers -----------------------------------------------------------------
+
+    private static final Constants constants = new Constants();
 
     private static final Logger logger = LoggerFactory.getLogger(MeasureRhythm.class);
 
@@ -807,8 +810,10 @@ public class MeasureRhythm
      * A chord alone in its slot gets no time when no voice can take it: the left hand of
      * Interstellar resuming after an unrested gap, under a right-hand half note. Left to
      * right, such a chord follows the chord before it in its voice when that one is timed.
-     * Otherwise its time is read from its abscissa, between the nearest timed chords on
-     * either side (or the bar line at the measure expected duration), and kept only when it
+     * Otherwise it takes the time of a timed chord standing in its column, within
+     * {@code maxColumnDx}, as the slots failed to group them. Failing that, its time is read
+     * from its abscissa, between the nearest timed chords on either side (or the bar line at
+     * the measure expected duration), and kept only when it
      * falls close to a whole number of its own duration after the left one, and the chord
      * still ends within the measure.
      */
@@ -861,8 +866,9 @@ public class MeasureRhythm
     // timeFromAbscissa //
     //------------------//
     /**
-     * The time of a chord read from its abscissa between the nearest timed chords around it,
-     * or null if it does not fall close to a whole number of its duration after the left one.
+     * The time of a timed chord in the column of the provided chord, else its time read from
+     * its abscissa between the nearest timed chords around it, or null if that does not fall
+     * close to a whole number of its duration after the left one.
      */
     private Rational timeFromAbscissa (AbstractChordInter chord,
                                        Rational dur,
@@ -870,10 +876,14 @@ public class MeasureRhythm
     {
         final MeasureStack stack = measure.getStack();
         final double x = stack.getXOffset(chord.getCenter());
+        final double maxColumnDx = stack.getSystem().getSheet().getScale().toPixels(
+                constants.maxColumnDx);
         AbstractChordInter left = null;
         AbstractChordInter right = null;
+        AbstractChordInter column = null;
         double xLeft = 0;
         double xRight = 0;
+        double columnDx = 0;
 
         for (AbstractChordInter other : measure.getStandardChords()) {
             if ((other == chord) || (other.getTimeOffset() == null)) {
@@ -881,6 +891,12 @@ public class MeasureRhythm
             }
 
             final double xo = stack.getXOffset(other.getCenter());
+            final double dx = Math.abs(xo - x);
+
+            if ((dx <= maxColumnDx) && ((column == null) || (dx < columnDx))) {
+                column = other;
+                columnDx = dx;
+            }
 
             if ((xo < x) && ((left == null) || (xo > xLeft))) {
                 left = other;
@@ -889,6 +905,10 @@ public class MeasureRhythm
                 right = other;
                 xRight = xo;
             }
+        }
+
+        if (column != null) {
+            return column.getTimeOffset(); // Same column as a timed chord, same time
         }
 
         if (left == null) {
@@ -1008,6 +1028,17 @@ public class MeasureRhythm
     }
 
     //~ Inner Classes ------------------------------------------------------------------------------
+
+    //-----------//
+    // Constants //
+    //-----------//
+    private static class Constants
+            extends ConstantSet
+    {
+        private final Scale.Fraction maxColumnDx = new Scale.Fraction(
+                1.0,
+                "Maximum horizontal delta for an untimed chord to take the time of a timed one");
+    }
 
     //------------//
     // SlotMapper //
