@@ -114,6 +114,9 @@ public class MeasureRhythm
     /** Companion in charge of tuplet generation. */
     private final TupletGenerator tupletGenerator;
 
+    /** Groups of chords to read as implicit tuplets from the start. */
+    private final List<List<AbstractChordInter>> forcedGroups;
+
     //~ Constructors -------------------------------------------------------------------------------
 
     /**
@@ -150,7 +153,26 @@ public class MeasureRhythm
                           int[] tuning,
                           boolean implicit)
     {
+        this(measure, tuning, implicit, Collections.emptyList());
+    }
+
+    /**
+     * Creates a new <code>MeasureRhythm</code> object, with specific voice penalties,
+     * possibly no implicit tuplets, and groups of chords to read as implicit tuplets.
+     *
+     * @param measure  the measure to process
+     * @param tuning   if not null, the voice penalties to use: {noLink, stemDiffTwo, staffDiff}
+     * @param implicit false for no implicit tuplets in this measure, whatever the switch
+     * @param forced   the groups of chords to read as implicit tuplets, ignored without
+     *                 implicit tuplets
+     */
+    public MeasureRhythm (Measure measure,
+                          int[] tuning,
+                          boolean implicit,
+                          List<List<AbstractChordInter>> forced)
+    {
         this.measure = measure;
+        forcedGroups = forced;
 
         final Part part = measure.getPart();
         final Sheet sheet = measure.getStack().getSystem().getSheet();
@@ -566,6 +588,14 @@ public class MeasureRhythm
     {
         removeTuplets(getImplicitTuplets());
 
+        final List<TupletInter> forcedTuplets = new ArrayList<>();
+
+        if (tupletGenerator != null) {
+            for (List<AbstractChordInter> group : forcedGroups) {
+                forcedTuplets.add(tupletGenerator.generateOneTuplet(group));
+            }
+        }
+
         clearInterleavedRests();
         detectInterleavedRests();
 
@@ -631,6 +661,7 @@ public class MeasureRhythm
                         // Run pass #2 with the new implicits generated on measure-long voices
                         // (an existing implicit tuplet may have been reused as a new one)
                         oldImplicits.removeAll(newImplicits);
+                        oldImplicits.removeAll(forcedTuplets);
                         removeTuplets(oldImplicits);
                         continue;
                     }
