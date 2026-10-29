@@ -29,6 +29,7 @@ import org.audiveris.omr.sheet.Part;
 import org.audiveris.omr.sheet.ProcessingSwitch;
 import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
+import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.rhythm.ChordsMapper.Mapping;
 import org.audiveris.omr.sheet.rhythm.Slot.CompoundSlot;
 import org.audiveris.omr.sheet.rhythm.Slot.MeasureSlot;
@@ -46,6 +47,7 @@ import org.audiveris.omr.sig.relation.NextInVoiceRelation;
 import org.audiveris.omr.sig.relation.Relation;
 import org.audiveris.omr.sig.relation.SeparateVoiceRelation;
 import org.audiveris.omr.util.Entities;
+import org.audiveris.omr.util.HorizontalSide;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -645,6 +647,8 @@ public class MeasureRhythm
                 }
             }
 
+            timeLeftovers();
+
             if (implicitTuplets) {
                 // Inspect last portion of voices
                 inspectVoicesEnd();
@@ -791,6 +795,136 @@ public class MeasureRhythm
         for (TupletInter tuplet : tuplets) {
             removeTuplet(tuplet);
         }
+    }
+
+    //---------------//
+    // timeLeftovers //
+    //---------------//
+    /**
+     * Give a time to the chords the slot mapping left without one, which the export would
+     * drop.
+     * <p>
+     * A chord alone in its slot gets no time when no voice can take it: the left hand of
+     * Interstellar resuming after an unrested gap, under a right-hand half note. Left to
+     * right, such a chord follows the chord before it in its voice when that one is timed.
+     * Otherwise its time is read from its abscissa, between the nearest timed chords on
+     * either side (or the bar line at the measure expected duration), and kept only when it
+     * falls close to a whole number of its own duration after the left one, and the chord
+     * still ends within the measure.
+     */
+    private void timeLeftovers ()
+    {
+        final List<AbstractChordInter> untimed = new ArrayList<>();
+
+        for (AbstractChordInter chord : measure.getStandardChords()) {
+            if ((chord.getVoice() != null) && (chord.getTimeOffset() == null)) {
+                untimed.add(chord);
+            }
+        }
+
+        if (untimed.isEmpty()) {
+            return;
+        }
+
+        Collections.sort(untimed, Inters.byCenterAbscissa);
+
+        final MeasureStack stack = measure.getStack();
+        final Rational expected = stack.getExpectedDuration();
+
+        for (AbstractChordInter chord : untimed) {
+            final Rational dur = chord.getDuration();
+
+            if ((dur == null) || (dur.compareTo(ZERO) <= 0) || (chord.getTimeOffset() != null)) {
+                continue;
+            }
+
+            final AbstractChordInter prev = chord.getVoice().getChordBefore(chord);
+            Rational time = null;
+
+            if (prev != null) {
+                if (prev.getTimeOffset() != null) {
+                    time = prev.getEndTime();
+                }
+            } else {
+                time = timeFromAbscissa(chord, dur, expected);
+            }
+
+            if ((time != null) && ((expected == null) || (time.plus(dur).compareTo(expected)
+                    <= 0))) {
+                logger.debug("{} {} timed at {}", measure, chord, time);
+                chord.setAndPushTime(time);
+            }
+        }
+    }
+
+    //------------------//
+    // timeFromAbscissa //
+    //------------------//
+    /**
+     * The time of a chord read from its abscissa between the nearest timed chords around it,
+     * or null if it does not fall close to a whole number of its duration after the left one.
+     */
+    private Rational timeFromAbscissa (AbstractChordInter chord,
+                                       Rational dur,
+                                       Rational expected)
+    {
+        final MeasureStack stack = measure.getStack();
+        final double x = stack.getXOffset(chord.getCenter());
+        AbstractChordInter left = null;
+        AbstractChordInter right = null;
+        double xLeft = 0;
+        double xRight = 0;
+
+        for (AbstractChordInter other : measure.getStandardChords()) {
+            if ((other == chord) || (other.getTimeOffset() == null)) {
+                continue;
+            }
+
+            final double xo = stack.getXOffset(other.getCenter());
+
+            if ((xo < x) && ((left == null) || (xo > xLeft))) {
+                left = other;
+                xLeft = xo;
+            } else if ((xo > x) && ((right == null) || (xo < xRight))) {
+                right = other;
+                xRight = xo;
+            }
+        }
+
+        if (left == null) {
+            return null;
+        }
+
+        final Rational tLeft = left.getTimeOffset();
+        final Rational tRight;
+
+        if (right != null) {
+            tRight = right.getTimeOffset();
+        } else if (expected != null) {
+            final Staff staff = chord.getTopStaff();
+            xRight = stack.getXOffset(
+                    measure.getSidePoint(HorizontalSide.RIGHT, staff),
+                    staff);
+            tRight = expected;
+        } else {
+            return null;
+        }
+
+        if ((tRight.compareTo(tLeft) <= 0) || (xRight <= xLeft)) {
+            return null;
+        }
+
+        final double span = tRight.minus(tLeft).doubleValue();
+        final double steps = (span * (x - xLeft) / (xRight - xLeft)) / dur.doubleValue();
+        final long n = Math.round(steps);
+
+        if ((n < 1) || (Math.abs(steps - n) > 0.25)) {
+            return null;
+        }
+
+        final Rational time = tLeft.plus(dur.times((int) n));
+
+        return (time.compareTo(tRight) < 0) ? time : null;
     }
 
     //-------------//
