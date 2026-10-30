@@ -417,7 +417,10 @@ public class BeamStructure
         completeBorderLines(-1, globalSlope, bottomMap, topMap);
 
         if (topMap.size() != bottomMap.size()) {
-            return null; // This should never happen!
+            // Stuck beams show inner borders only where a gap opens between them:
+            // keep the outer borders, splitLines() will separate the beams if needed
+            keepOnly(topMap, topMap.firstKey());
+            keepOnly(bottomMap, bottomMap.lastKey());
         }
 
         // Loop on beam lines
@@ -671,6 +674,23 @@ public class BeamStructure
     public boolean isVip ()
     {
         return vip;
+    }
+
+    //----------//
+    // keepOnly //
+    //----------//
+    /**
+     * Keep only the border line at the provided offset.
+     *
+     * @param lines  map of border lines
+     * @param offset offset of the line to keep
+     */
+    private static void keepOnly (SortedMap<Double, Line2D> lines,
+                                  Double offset)
+    {
+        final Line2D kept = lines.get(offset);
+        lines.clear();
+        lines.put(offset, kept);
     }
 
     //------------//
