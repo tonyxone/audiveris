@@ -30,6 +30,7 @@ import org.audiveris.omr.glyph.GlyphGroup;
 import static org.audiveris.omr.glyph.GlyphGroup.SYMBOL;
 import org.audiveris.omr.glyph.GlyphIndex;
 import org.audiveris.omr.glyph.Grades;
+import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.glyph.ShapeSet;
 import org.audiveris.omr.image.ImageUtil;
 import static org.audiveris.omr.image.PixelSource.BACKGROUND;
@@ -350,6 +351,34 @@ public class SymbolsFilter
             return unboosted < constants.minHeadContextualGrade.getValue();
         }
 
+        //----------------//
+        // isWeakVoidHead //
+        //----------------//
+        /**
+         * Report whether the inter is a hollow head too weak to hide its pixels, or a chord
+         * or stem holding only such heads.
+         *
+         * @param inter the inter to check
+         * @return true for such a head, chord or stem
+         */
+        private static boolean isWeakVoidHead (Inter inter)
+        {
+            if (inter instanceof HeadChordInter chord) {
+                final List<? extends Inter> notes = chord.getNotes();
+
+                return !notes.isEmpty() && notes.stream().allMatch(SymbolsCleaner::isWeakVoidHead);
+            }
+
+            if (inter instanceof StemInter stem) {
+                final Set<HeadInter> heads = stem.getHeads();
+
+                return !heads.isEmpty() && heads.stream().allMatch(SymbolsCleaner::isWeakVoidHead);
+            }
+
+            return (inter instanceof HeadInter) && (inter.getShape() == Shape.NOTEHEAD_VOID)
+                    && (inter.getBestGrade() < constants.minHeadContextualGrade.getValue());
+        }
+
         //-------------//
         // eraseInters //
         //-------------//
@@ -420,6 +449,12 @@ public class SymbolsFilter
                     // pixels, even as an optional glyph, splits the clef in two and it is never
                     // recognized. Left whole, the clef is, and SigReducer then prefers it.
                     if (isBoostedStemLessHead(inter)) {
+                        continue;
+                    }
+
+                    // Likewise for a weak hollow head and its stem: the curl and line of a
+                    // treble clef change fit them, and erasing them leaves no clef to find.
+                    if (isWeakVoidHead(inter)) {
                         continue;
                     }
 

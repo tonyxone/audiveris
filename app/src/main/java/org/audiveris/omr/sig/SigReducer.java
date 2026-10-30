@@ -99,6 +99,7 @@ import java.awt.Rectangle;
 import java.awt.geom.Line2D;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.Iterator;
@@ -1491,6 +1492,15 @@ public class SigReducer
             left.decrease(1.0);
         }
 
+        // A clef change misread piece by piece: its curl as a hollow head, its line as the stem
+        // of that head, its hook as a slur. Each lies within the clef, where no such symbol is
+        // printed, so it gives way. Otherwise the slur or stem wins and the clef is lost.
+        if ((left instanceof ClefInter leftClef) && isClefPiece(right, leftClef)) {
+            right.decrease(1.0);
+        } else if ((right instanceof ClefInter rightClef) && isClefPiece(left, rightClef)) {
+            left.decrease(1.0);
+        }
+
         // If there is no support between left & right, insert an exclusion
         final SIGraph leftSig = left.getSig();
 
@@ -1550,6 +1560,47 @@ public class SigReducer
         }
 
         return best;
+    }
+
+    //-------------//
+    // isClefPiece //
+    //-------------//
+    /**
+     * Report whether the inter lies within the clef and is a hollow head, a chord or stem
+     * of such heads only, or a slur: what the pieces of a clef can be misread as.
+     *
+     * @param inter the inter to check
+     * @param clef  the clef overlapping the inter
+     * @return true if so
+     */
+    private static boolean isClefPiece (Inter inter,
+                                        ClefInter clef)
+    {
+        final Rectangle box = clef.getBounds();
+
+        if (!box.contains(inter.getBounds())) {
+            return false;
+        }
+
+        if (inter instanceof SlurInter) {
+            return true;
+        }
+
+        if (inter instanceof HeadInter) {
+            return inter.getShape() == Shape.NOTEHEAD_VOID;
+        }
+
+        final Collection<? extends Inter> heads;
+
+        if (inter instanceof StemInter stem) {
+            heads = stem.getHeads();
+        } else if (inter instanceof HeadChordInter chord) {
+            heads = chord.getNotes();
+        } else {
+            return false;
+        }
+
+        return !heads.isEmpty() && heads.stream().allMatch(h -> isClefPiece(h, clef));
     }
 
     //----------------//
