@@ -82,6 +82,9 @@ public class StackRhythm
     /** Measures to read with beam groups as implicit tuplets: they came out long without. */
     private final Map<Measure, List<List<AbstractChordInter>>> forced = new LinkedHashMap<>();
 
+    /** The time in force, as the page reading found it, if known. */
+    private TimeRational time;
+
     //~ Constructors -------------------------------------------------------------------------------
 
     /**
@@ -293,6 +296,25 @@ public class StackRhythm
     // process //
     //---------//
     /**
+     * Determine stack rhythm data (voices and timing), knowing the time in force.
+     * <p>
+     * A page with no time signature of its own reads its stacks with the time of the pages
+     * before, which the stack cannot find by itself.
+     *
+     * @param expectedDuration The expected duration for this stack, null if not known
+     * @param time             The time in force, null if not known
+     */
+    public void process (Rational expectedDuration,
+                         TimeRational time)
+    {
+        this.time = time;
+        process(expectedDuration);
+    }
+
+    //---------//
+    // process //
+    //---------//
+    /**
      * Determine stack rhythm data (voices and timing).
      *
      * @param expectedDuration The expected duration for this stack, null if not known
@@ -334,8 +356,10 @@ public class StackRhythm
      * tuplet is inferred only where it removes exactly the excess of a voice. When the
      * reading splits a line of triplets between voices, as the left hand of Debussy's first
      * Arabesque does at a clef change, no voice gets them, and the bar comes out long.
-     * In a time that is not compound, every such group of the measure is read as a tuplet,
-     * and kept so only where the measure then fits its time.
+     * Every such group of the measure is read as a tuplet, unless it makes a beat of a
+     * compound time such as 6/8 (three eighths, six sixteenths), and kept so only where the
+     * measure then fits its time. Three sixteenths make half a beat of 6/8, so they are a
+     * triplet, as in La Campanella, where the sign is printed in the first bar only.
      *
      * @return true if some measure got tuplets, and the stack must be read again
      */
@@ -343,9 +367,15 @@ public class StackRhythm
     {
         final Rational expected = stack.getExpectedDuration();
 
-        if ((expected == null) || stack.isImplicit() || isCompound()) {
+        final TimeRational current = currentTime();
+
+        if ((expected == null) || stack.isImplicit() || (current == null)) {
             return false;
         }
+
+        // In a compound time, a group that makes a beat is a plain beat
+        final boolean compound = (current.num % 3 == 0) && (current.num > 3) && (current.den >= 8);
+        final Rational beat = compound ? new Rational(3, current.den) : null;
 
         boolean added = false;
 
@@ -354,7 +384,15 @@ public class StackRhythm
                 continue;
             }
 
-            final List<List<AbstractChordInter>> groups = plainGroups(measure);
+            final List<List<AbstractChordInter>> groups = new ArrayList<>();
+
+            for (List<AbstractChordInter> group : plainGroups(measure)) {
+                final Rational total = group.get(0).getDurationSansTuplet().times(group.size());
+
+                if (!total.equals(beat)) {
+                    groups.add(group);
+                }
+            }
 
             if (!groups.isEmpty()) {
                 forced.put(measure, groups);
@@ -429,23 +467,26 @@ public class StackRhythm
         return expected.equals(longest);
     }
 
-    //------------//
-    // isCompound //
-    //------------//
+    //-------------//
+    // currentTime //
+    //-------------//
     /**
-     * Whether the time of the stack is compound, such as 6/8 or 9/8, where a beam group of
-     * three eighths is a plain beat.
+     * The time of the stack, as inferred, or else as given by the page reading or by a time
+     * signature earlier in the page, if any.
      */
-    private boolean isCompound ()
+    private TimeRational currentTime ()
     {
-        TimeRational time = stack.getInferredTime();
-
-        if (time == null) {
-            final AbstractTimeInter ts = stack.getCurrentTimeSignature();
-            time = (ts != null) ? ts.getTimeRational() : null;
+        if (stack.getInferredTime() != null) {
+            return stack.getInferredTime();
         }
 
-        return (time == null) || ((time.num % 3 == 0) && (time.num > 3) && (time.den >= 8));
+        if (time != null) {
+            return time;
+        }
+
+        final AbstractTimeInter ts = stack.getCurrentTimeSignature();
+
+        return (ts != null) ? ts.getTimeRational() : null;
     }
 
     //--------//
