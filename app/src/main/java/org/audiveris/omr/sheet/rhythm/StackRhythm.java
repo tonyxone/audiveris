@@ -27,12 +27,15 @@ import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sig.inter.AbstractChordInter;
 import org.audiveris.omr.sig.inter.AbstractTimeInter;
 import org.audiveris.omr.sig.inter.BeamGroupInter;
+import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.Inters;
 import org.audiveris.omr.sig.inter.TupletInter;
+import org.audiveris.omr.sig.inter.WordInter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -360,6 +363,12 @@ public class StackRhythm
      * compound time such as 6/8 (three eighths, six sixteenths), and kept so only where the
      * measure then fits its time. Three sixteenths make half a beat of 6/8, so they are a
      * triplet, as in La Campanella, where the sign is printed in the first bar only.
+     * <p>
+     * Conversely, a measure of a compound time that comes out short may hold duplets: two
+     * eighths in the time of three in 9/8, as Debussy writes in Clair de lune. Audiveris has
+     * no duplet sign to recognize, but reads its "2" as a word: a pair that would make a
+     * beat as a duplet and has such a "2" by it is read as one, kept only where the measure
+     * then fits its time.
      *
      * @return true if some measure got tuplets, and the stack must be read again
      */
@@ -377,9 +386,21 @@ public class StackRhythm
         final boolean compound = (current.num % 3 == 0) && (current.num > 3) && (current.den >= 8);
         final Rational beat = compound ? new Rational(3, current.den) : null;
 
+        final List<Rectangle> twos = compound ? dupletSigns() : Collections.emptyList();
         boolean added = false;
 
         for (Measure measure : stack.getMeasures()) {
+            if (compound && isShort(measure, expected)) {
+                final List<List<AbstractChordInter>> pairs = plainPairs(measure, beat, twos);
+
+                if (!pairs.isEmpty()) {
+                    forced.put(measure, pairs);
+                    added = true;
+                }
+
+                continue;
+            }
+
             if (!isLong(measure, expected)) {
                 continue;
             }
@@ -418,7 +439,7 @@ public class StackRhythm
 
         for (Measure measure : new ArrayList<>(forced.keySet())) {
             if (fits(measure, expected)) {
-                logger.info("{} long without tuplets, read with {}", measure, forced.get(measure)
+                logger.info("{} off its time without tuplets, read with {}", measure, forced.get(measure)
                         .size());
             } else {
                 forced.remove(measure);
@@ -508,6 +529,133 @@ public class StackRhythm
         }
 
         return false;
+    }
+
+    //------------//
+    // plainPairs //
+    //------------//
+    /**
+     * The pairs of chords of a measure that could be unmarked duplets: 2 chords of equal
+     * duration, without a tuplet sign, that make a beat as a duplet. A pair is either a beam
+     * group of 2, or 2 unbeamed chords (a rest and a flagged eighth, say) that follow each
+     * other in a voice from the start of a beat.
+     * <p>
+     * A "2" must be printed by the pair, or by a pair that starts at the same time: both
+     * hands play the duplet, and the "2" of one of them may not be read.
+     */
+    private List<List<AbstractChordInter>> plainPairs (Measure measure,
+                                                       Rational beat,
+                                                       List<Rectangle> twos)
+    {
+        final Set<AbstractChordInter> chords = measure.getStandardChords();
+        final List<List<AbstractChordInter>> candidates = new ArrayList<>();
+
+        for (BeamGroupInter bg : measure.getBeamGroups()) {
+            final List<AbstractChordInter> pair = new ArrayList<>(bg.getChords());
+
+            if ((pair.size() == 2) && isDuplet(pair, chords, beat)) {
+                Collections.sort(pair, Inters.byCenterAbscissa);
+                candidates.add(pair);
+            }
+        }
+
+        for (Voice voice : measure.getVoices()) {
+            final List<AbstractChordInter> seq = voice.getChords();
+
+            for (int i = 0; i < (seq.size() - 1); i++) {
+                final List<AbstractChordInter> pair = List.of(seq.get(i), seq.get(i + 1));
+                final Rational start = pair.get(0).getTimeOffset();
+
+                if ((pair.get(0).getBeamGroup() == null) && (pair.get(1).getBeamGroup() == null)
+                        && (start != null) && (start.divides(beat).den == 1)
+                        && isDuplet(pair, chords, beat)) {
+                    candidates.add(pair);
+                    i++;
+                }
+            }
+        }
+
+        final Set<Rational> markedStarts = new LinkedHashSet<>();
+
+        for (List<AbstractChordInter> pair : candidates) {
+            if (isMarked(pair, twos)) {
+                markedStarts.add(pair.get(0).getTimeOffset());
+            }
+        }
+
+        final List<List<AbstractChordInter>> pairs = new ArrayList<>();
+
+        for (List<AbstractChordInter> pair : candidates) {
+            if (markedStarts.contains(pair.get(0).getTimeOffset())) {
+                pairs.add(pair);
+            }
+        }
+
+        return pairs;
+    }
+
+    //-------------//
+    // dupletSigns //
+    //-------------//
+    /**
+     * The bounds of the words "2" of the system, the duplet signs it may hold.
+     */
+    private List<Rectangle> dupletSigns ()
+    {
+        final List<Rectangle> boxes = new ArrayList<>();
+
+        for (Inter inter : stack.getSystem().getSig().inters(WordInter.class)) {
+            if ("2".equals(((WordInter) inter).getValue())) {
+                boxes.add(inter.getBounds());
+            }
+        }
+
+        return boxes;
+    }
+
+    //----------//
+    // isMarked //
+    //----------//
+    /**
+     * Whether a "2" is printed by a pair of chords: over its span, at most two interlines
+     * above or below it.
+     */
+    private boolean isMarked (List<AbstractChordInter> pair,
+                              List<Rectangle> twos)
+    {
+        final int interline = stack.getSystem().getSheet().getScale().getInterline();
+        final Rectangle box = pair.get(0).getBounds().union(pair.get(1).getBounds());
+        box.grow(interline, 2 * interline);
+
+        return twos.stream().anyMatch(box::intersects);
+    }
+
+    //----------//
+    // isDuplet //
+    //----------//
+    /**
+     * Whether 2 chords of the measure, of equal duration and without a tuplet sign, would
+     * make a beat as a duplet: two notes in the time of three.
+     */
+    private static boolean isDuplet (List<AbstractChordInter> pair,
+                                     Set<AbstractChordInter> chords,
+                                     Rational beat)
+    {
+        Rational dur = null;
+
+        for (AbstractChordInter chord : pair) {
+            final TupletInter tuplet = chord.getTuplet();
+            final Rational d = chord.getDurationSansTuplet();
+
+            if (!chords.contains(chord) || ((tuplet != null) && !tuplet.isImplicit())
+                    || (d == null) || ((dur != null) && !dur.equals(d))) {
+                return false;
+            }
+
+            dur = d;
+        }
+
+        return dur.times(3).equals(beat);
     }
 
     //-------------//

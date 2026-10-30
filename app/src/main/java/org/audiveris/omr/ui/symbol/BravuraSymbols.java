@@ -234,6 +234,7 @@ public class BravuraSymbols
             case TREMOLO_2 -> ints(0xE221);
             case TREMOLO_3 -> ints(0xE222);
             case TUPLET_SIX -> ints(0xE886);
+            case TUPLET_TWO -> ints(0xE882);
             case TUPLET_THREE -> ints(0xE883);
             case TURN -> ints(0xE567);
             case TURN_INVERTED -> ints(0xE568);

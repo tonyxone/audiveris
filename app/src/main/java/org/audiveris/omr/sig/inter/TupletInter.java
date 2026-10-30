@@ -89,7 +89,7 @@ public class TupletInter
      * Creates a new <code>TupletInter</code> object.
      *
      * @param glyph the tuplet glyph
-     * @param shape TUPLET_THREE or TUPLET_SIX
+     * @param shape TUPLET_THREE, TUPLET_SIX or TUPLET_TWO
      * @param grade the inter quality
      */
     public TupletInter (Glyph glyph,
@@ -346,6 +346,7 @@ public class TupletInter
         return switch (shape) {
             case TUPLET_THREE -> new DurationFactor(2, 3);
             case TUPLET_SIX -> new DurationFactor(4, 6);
+            case TUPLET_TWO -> new DurationFactor(3, 2);
 
             default -> {
                 logger.error("Incorrect tuplet shape " + shape);

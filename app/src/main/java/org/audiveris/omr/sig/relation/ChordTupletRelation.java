@@ -100,7 +100,7 @@ public class ChordTupletRelation
     private double getTupletCoeff (Shape shape)
     {
         return switch (shape) {
-            case TUPLET_THREE -> constants.tupletThreeSupportCoeff.getValue();
+            case TUPLET_THREE, TUPLET_TWO -> constants.tupletThreeSupportCoeff.getValue();
             case TUPLET_SIX -> constants.tupletSixSupportCoeff.getValue();
             default -> throw new IllegalArgumentException("Illegal tuplet shape " + shape);
         };

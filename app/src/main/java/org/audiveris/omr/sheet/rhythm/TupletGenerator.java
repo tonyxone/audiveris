@@ -484,6 +484,22 @@ public class TupletGenerator
      */
     public TupletInter generateOneTuplet (List<AbstractChordInter> group)
     {
+        return generateOneTuplet(group, null);
+    }
+
+    //-------------------//
+    // generateOneTuplet //
+    //-------------------//
+    /**
+     * Generate one implicit tuplet of the provided shape for the provided group of chords.
+     *
+     * @param group the group of chords
+     * @param shape the tuplet shape, or null to choose it from the group size
+     * @return the generated implicit tuplet
+     */
+    public TupletInter generateOneTuplet (List<AbstractChordInter> group,
+                                          Shape shape)
+    {
         final SIGraph sig = system.getSig();
 
         // Existing tuplet?
@@ -494,9 +510,10 @@ public class TupletGenerator
         }
 
         // Simplistic approach
-        final int size = group.size();
-        final int nb = (int) Math.rint(size / 3.0);
-        final Shape shape = (nb == 1) ? Shape.TUPLET_THREE : Shape.TUPLET_SIX;
+        if (shape == null) {
+            final int nb = (int) Math.rint(group.size() / 3.0);
+            shape = (nb == 1) ? Shape.TUPLET_THREE : Shape.TUPLET_SIX;
+        }
 
         final TupletInter tuplet = new TupletInter(null, shape, 1.0);
         tuplet.setImplicit(true);
@@ -580,7 +597,9 @@ public class TupletGenerator
     {
         // Tuplet dimension
         final MusicFamily family = system.getSheet().getStub().getMusicFamily();
-        final FontSymbol fs = shape.getFontSymbolByInterline(family, scale.getInterline());
+        final FontSymbol own = shape.getFontSymbolByInterline(family, scale.getInterline());
+        final FontSymbol fs = (own != null) ? own
+                : Shape.TUPLET_THREE.getFontSymbolByInterline(family, scale.getInterline());
         final Dimension dim = fs.getDimension();
 
         // Vertical direction from group to tuplet, based on group tails side
