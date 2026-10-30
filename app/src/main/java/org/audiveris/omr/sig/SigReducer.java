@@ -1466,6 +1466,21 @@ public class SigReducer
             return;
         }
 
+        // Two stems found for the one stem of a beam, each from its own reading of the head:
+        // the stem of the weaker head gives way. Decided on the stems' own grades, the stem of
+        // a false head may win, and once that head goes, the real head, stem and beam go too.
+        if ((left instanceof StemInter leftStem) && (right instanceof StemInter rightStem)
+                && areRivalReadings(leftStem, rightStem)) {
+            final double leftHead = bestHeadGrade(leftStem);
+            final double rightHead = bestHeadGrade(rightStem);
+
+            if (leftHead < rightHead) {
+                left.decrease(1.0);
+            } else if (rightHead < leftHead) {
+                right.decrease(1.0);
+            }
+        }
+
         // A clef recognized on the pixels of a stemless head: an F clef's round top fits a
         // whole-head template, and a head admitted there only thanks to its stem-less boost
         // would otherwise win and take the clef change away. A real whole head never lies
@@ -1482,6 +1497,59 @@ public class SigReducer
         if (leftSig.noSupport(left, right)) {
             leftSig.insertExclusion(left, right, OVERLAP);
         }
+    }
+
+    //------------------//
+    // areRivalReadings //
+    //------------------//
+    /**
+     * Tell whether two overlapping stems are rival readings of one beam stem: they share
+     * a beam and every head of one excludes every head of the other.
+     *
+     * @param one   a stem
+     * @param other another stem, overlapping the first one
+     * @return true if so
+     */
+    private boolean areRivalReadings (StemInter one,
+                                      StemInter other)
+    {
+        final Set<AbstractBeamInter> beams = new LinkedHashSet<>(one.getBeams());
+        beams.retainAll(other.getBeams());
+
+        if (beams.isEmpty()) {
+            return false;
+        }
+
+        final Set<HeadInter> heads = one.getHeads();
+        final Set<HeadInter> otherHeads = other.getHeads();
+
+        if (heads.isEmpty() || otherHeads.isEmpty()) {
+            return false;
+        }
+
+        for (HeadInter head : heads) {
+            for (HeadInter otherHead : otherHeads) {
+                if (sig.getExclusion(head, otherHead) == null) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    //---------------//
+    // bestHeadGrade //
+    //---------------//
+    private static double bestHeadGrade (StemInter stem)
+    {
+        double best = 0;
+
+        for (HeadInter head : stem.getHeads()) {
+            best = Math.max(best, head.getBestGrade());
+        }
+
+        return best;
     }
 
     //----------------//
