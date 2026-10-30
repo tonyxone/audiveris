@@ -22,6 +22,7 @@
 package org.audiveris.omr.sheet.symbol;
 
 import org.audiveris.omr.classifier.Evaluation;
+import org.audiveris.omr.constant.Constant;
 import org.audiveris.omr.constant.ConstantSet;
 import org.audiveris.omr.glyph.Glyph;
 import org.audiveris.omr.glyph.Grades;
@@ -167,12 +168,19 @@ public class DotFactory
      * <p>
      * For a standard staff (5) or for a OneLineStaff (1), distance to closest line or concrete
      * ledger is checked.
+     * <p>
+     * Some editions print the dot of a note on a ledger at the height of the ledger, beyond its
+     * end, as in the left hand chords of Chopin's Winter Wind etude. A clear dot there is kept:
+     * round, not too small, and evaluated with a high grade, for a mere piece of a broken ledger
+     * or stem is not.
      *
+     * @param eval  evaluation result
      * @param glyph the dot glyph to check
      * @param staff the closest staff
      * @return true if OK
      */
-    private boolean checkDistanceToConcreteLine (Glyph glyph,
+    private boolean checkDistanceToConcreteLine (Evaluation eval,
+                                                 Glyph glyph,
                                                  Staff staff)
     {
         if (staff.isTablature()) {
@@ -196,7 +204,8 @@ public class DotFactory
                 // Outside staff height, look for concrete ledgers
                 final LedgerInter ledger = staff.getConcreteLedgerNearby(center);
 
-                if (ledger == null) {
+                if ((ledger == null) || (!overlapsAbscissa(ledger.getBounds(), glyph.getBounds())
+                        && isClearDot(eval, glyph, staff))) {
                     if (glyph.isVip()) {
                         logger.info("VIP glyph#{} dot isolated OK", glyph.getId());
                     }
@@ -518,7 +527,7 @@ public class DotFactory
                                   Staff closestStaff)
     {
         // Discard glyph too close to staff line or ledger
-        if (!checkDistanceToConcreteLine(glyph, closestStaff)) {
+        if (!checkDistanceToConcreteLine(eval, glyph, closestStaff)) {
             return;
         }
 
@@ -531,6 +540,26 @@ public class DotFactory
         instantCheckStaccato(dot); // Staccato dot
 
         // We cannot run augmentation check since rest inters may not have been created yet
+    }
+
+    //------------//
+    // isClearDot //
+    //------------//
+    /**
+     * Whether a dot glyph is clearly a dot: well evaluated, round and not too small.
+     */
+    private static boolean isClearDot (Evaluation eval,
+                                       Glyph glyph,
+                                       Staff staff)
+    {
+        final Rectangle box = glyph.getBounds();
+        final double minSize = constants.minClearDotSize.getValue() * staff.getSpecificInterline();
+        final double ratio = (double) Math.max(box.width, box.height) / Math.min(
+                box.width,
+                box.height);
+
+        return (eval.grade >= constants.minClearDotGrade.getValue()) && (box.width >= minSize)
+                && (box.height >= minSize) && (ratio <= constants.maxClearDotRatio.getValue());
     }
 
     //------------------------//
@@ -660,6 +689,18 @@ public class DotFactory
         checkStackRepeats();
     }
 
+    //------------------//
+    // overlapsAbscissa //
+    //------------------//
+    /**
+     * Whether two boxes share some abscissa.
+     */
+    private static boolean overlapsAbscissa (Rectangle a,
+                                             Rectangle b)
+    {
+        return (a.x < (b.x + b.width)) && (b.x < (a.x + a.width));
+    }
+
     //~ Inner Classes ------------------------------------------------------------------------------
 
     //-----------//
@@ -671,6 +712,18 @@ public class DotFactory
         private final Scale.Fraction minDyFromLine = new Scale.Fraction(
                 0.3,
                 "Minimum vertical distance between dot center and staff line/ledger");
+
+        private final Constant.Ratio minClearDotGrade = new Constant.Ratio(
+                0.95,
+                "Minimum grade for a dot beyond the end of a ledger");
+
+        private final Scale.Fraction minClearDotSize = new Scale.Fraction(
+                0.35,
+                "Minimum width and height for a dot beyond the end of a ledger");
+
+        private final Constant.Ratio maxClearDotRatio = new Constant.Ratio(
+                1.25,
+                "Maximum ratio between sides of a dot beyond the end of a ledger");
     }
 
     //-----//
