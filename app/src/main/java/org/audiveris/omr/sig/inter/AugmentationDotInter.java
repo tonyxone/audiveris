@@ -25,6 +25,7 @@ import org.audiveris.omr.glyph.Glyph;
 import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.math.GeoOrder;
 import org.audiveris.omr.math.GeoUtil;
+import org.audiveris.omr.math.Rational;
 import org.audiveris.omr.sheet.Part;
 import org.audiveris.omr.sheet.ProcessingSwitch;
 import org.audiveris.omr.sheet.Scale;
@@ -666,8 +667,12 @@ public class AugmentationDotInter
         } else {
             // Head on or between line(s)?
             final int p = h1.getIntegerPitch();
+            final HeadInter beamFit = dottedByBeamGroup(h1, h2);
 
-            if ((p % 2) == 0) {
+            if (beamFit != null) {
+                // The beam group of the shorter chord tells
+                links.add(new Link(beamFit, new AugmentationRelation(), true));
+            } else if ((p % 2) == 0) {
                 // On line
                 final int yHead = h1.getCenter().y;
                 final int yAug = getCenter().y;
@@ -702,6 +707,77 @@ public class AugmentationDotInter
         }
 
         return links;
+    }
+
+    //-------------------//
+    // dottedByBeamGroup //
+    //-------------------//
+    /**
+     * For a head shared by two chords of different durations, tell which one the dot
+     * is for from the beam group of the shorter chord.
+     * <p>
+     * A beam group makes a plain or dotted note value. If it does so only with the dot,
+     * as a dotted eighth and three sixteenths do, the dot is for the beamed chord. If it
+     * does so only without, as six sixteenths do under a dotted quarter sharing their
+     * first head, the dot is for the other chord.
+     *
+     * @param h1 a shared head
+     * @param h2 its mirror
+     * @return the head to dot, or null if the beam group does not tell
+     */
+    private static HeadInter dottedByBeamGroup (HeadInter h1,
+                                                HeadInter h2)
+    {
+        final int bf1 = h1.getChord().getBeamsOrFlagsNumber();
+        final int bf2 = h2.getChord().getBeamsOrFlagsNumber();
+
+        if (bf1 == bf2) {
+            return null;
+        }
+
+        final HeadInter shorter = (bf1 > bf2) ? h1 : h2;
+        final HeadInter longer = (shorter == h1) ? h2 : h1;
+        final AbstractChordInter chord = shorter.getChord();
+        final BeamGroupInter group = chord.getBeamGroup();
+
+        if (group == null) {
+            return null;
+        }
+
+        Rational plain = Rational.ZERO;
+
+        for (AbstractChordInter member : group.getChords()) {
+            final Rational dur = member.getDurationSansDotOrTuplet();
+
+            if (dur == null) {
+                return null;
+            }
+
+            plain = plain.plus(dur);
+        }
+
+        final Rational dotted = plain.plus(chord.getDurationSansDotOrTuplet().divides(2));
+
+        if (isNoteValue(dotted) && !isNoteValue(plain)) {
+            return shorter;
+        }
+
+        if (isNoteValue(plain) && !isNoteValue(dotted)) {
+            return longer;
+        }
+
+        return null;
+    }
+
+    //-------------//
+    // isNoteValue //
+    //-------------//
+    /**
+     * Tell whether a duration is that of a plain or dotted note: 1 or 3 over a power of 2.
+     */
+    private static boolean isNoteValue (Rational dur)
+    {
+        return ((dur.num == 1) || (dur.num == 3)) && (Integer.bitCount(dur.den) == 1);
     }
 
     //~ Static Methods -----------------------------------------------------------------------------
