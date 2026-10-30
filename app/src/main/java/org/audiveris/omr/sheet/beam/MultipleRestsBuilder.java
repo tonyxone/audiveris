@@ -38,6 +38,7 @@ import org.audiveris.omr.sheet.grid.BarFilamentBuilder;
 import org.audiveris.omr.sheet.grid.StaffPeak;
 import org.audiveris.omr.sheet.grid.StaffProjector;
 import org.audiveris.omr.sig.SIGraph;
+import org.audiveris.omr.sig.inter.BeamGroupInter;
 import org.audiveris.omr.sig.inter.BeamInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.MultipleRestInter;
@@ -280,6 +281,8 @@ public class MultipleRestsBuilder
      * Check every beam as a potential multiple rest.
      * <ul>
      * <li>Minimum beam width
+     * <li>Beam must be alone in its group: two beams stuck together on the mid line, as in
+     * the first sextuplet of Chopin's Winter Wind etude, belong to notes
      * <li>Beam must be stuck on staff mid line
      * <li>Presence of proper vertical serifs on either horizontal side
      * </ul>
@@ -296,6 +299,13 @@ public class MultipleRestsBuilder
 
             // Long enough?
             if (beam.getBounds().width < params.minLength) {
+                continue;
+            }
+
+            // Alone in its group?
+            final BeamGroupInter group = beam.getGroup();
+
+            if ((group != null) && (group.getMembers().size() > 1)) {
                 continue;
             }
 
