@@ -449,6 +449,7 @@ public enum Shape
     MULTIPLE_REST_LEFT("Multiple measure rest left"),
     MULTIPLE_REST_MIDDLE("Multiple measure rest middle"),
     MULTIPLE_REST_RIGHT("Multiple measure rest right"),
+    TUPLET_TWO("Duplet, inferred where a compound time needs it"),
 
     //
     // Key signatures ---

@@ -22,6 +22,7 @@
 package org.audiveris.omr.sheet.rhythm;
 
 import org.audiveris.omr.constant.ConstantSet;
+import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.math.Rational;
 import static org.audiveris.omr.math.Rational.THREE_OVER_TWO;
 import static org.audiveris.omr.math.Rational.TWO_OVER_THREE;
@@ -603,7 +604,10 @@ public class MeasureRhythm
 
         if (tupletGenerator != null) {
             for (List<AbstractChordInter> group : forcedGroups) {
-                forcedTuplets.add(tupletGenerator.generateOneTuplet(group));
+                // A pair is a duplet
+                forcedTuplets.add(tupletGenerator.generateOneTuplet(
+                        group,
+                        (group.size() == 2) ? Shape.TUPLET_TWO : null));
             }
         }
 
