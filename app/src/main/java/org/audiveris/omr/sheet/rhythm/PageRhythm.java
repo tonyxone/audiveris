@@ -496,7 +496,7 @@ public class PageRhythm
 
                 try {
                     logger.debug("\n--- Processing {} {} expDur:{}", sn, stack, range.duration);
-                    new StackRhythm(stack).process(range.duration);
+                    new StackRhythm(stack).process(range.duration, range.timeRational);
                 } catch (Exception ex) {
                     logger.warn("Error on stack " + stack + " " + ex, ex);
                 }

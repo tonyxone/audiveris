@@ -416,6 +416,12 @@ public class MeasureRhythm
                 if (expectedDur != null) {
                     // Check excess ratio
                     final Rational stop = voice.getLastChord().getEndTime();
+
+                    if ((start == null) || (stop == null)) {
+                        // A chord left without a time: the portion cannot be measured
+                        continue;
+                    }
+
                     final Rational actualDur = stop.minus(start);
                     final Rational normalDur = expectedDur.minus(start);
 
