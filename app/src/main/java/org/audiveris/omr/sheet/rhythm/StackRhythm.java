@@ -22,8 +22,12 @@
 package org.audiveris.omr.sheet.rhythm;
 
 import org.audiveris.omr.math.Rational;
+import org.audiveris.omr.score.TimeRational;
 import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sig.inter.AbstractChordInter;
+import org.audiveris.omr.sig.inter.AbstractTimeInter;
+import org.audiveris.omr.sig.inter.BeamGroupInter;
+import org.audiveris.omr.sig.inter.Inters;
 import org.audiveris.omr.sig.inter.TupletInter;
 
 import org.slf4j.Logger;
@@ -32,6 +36,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -73,6 +78,9 @@ public class StackRhythm
 
     /** Measures to read without implicit tuplets: they came out short with them. */
     private final Set<Measure> noImplicit = new LinkedHashSet<>();
+
+    /** Measures to read with beam groups as implicit tuplets: they came out long without. */
+    private final Map<Measure, List<List<AbstractChordInter>>> forced = new LinkedHashMap<>();
 
     //~ Constructors -------------------------------------------------------------------------------
 
@@ -188,8 +196,11 @@ public class StackRhythm
 
         // Process measure by measure
         for (Measure measure : stack.getMeasures()) {
-            final boolean measureOk = new MeasureRhythm(measure, tuning, !noImplicit.contains(measure))
-                    .process();
+            final boolean measureOk = new MeasureRhythm(
+                    measure,
+                    tuning,
+                    !noImplicit.contains(measure),
+                    forced.getOrDefault(measure, Collections.emptyList())).process();
 
             if (!measureOk) {
                 measure.setAbnormal(true);
@@ -297,12 +308,209 @@ public class StackRhythm
                 ok = doProcess();
             }
 
+            if (addMissedTuplets()) {
+                ok = doProcess();
+
+                if (dropUnfitForced()) {
+                    ok = doProcess();
+                }
+            }
+
             if (!ok) {
                 logger.info("{}{} no correct rhythm", stack.getSystem().getLogPrefix(), stack);
             }
         } catch (Exception ex) {
             logger.warn("StackRhythm error processing {} {}", stack, ex.toString(), ex);
         }
+    }
+
+    //------------------//
+    // addMissedTuplets //
+    //------------------//
+    /**
+     * Read as tuplets the beam groups of 3 or 6 plain notes of a measure that comes out long.
+     * <p>
+     * A triplet or sextuplet sign is often printed on the first groups only, and an implicit
+     * tuplet is inferred only where it removes exactly the excess of a voice. When the
+     * reading splits a line of triplets between voices, as the left hand of Debussy's first
+     * Arabesque does at a clef change, no voice gets them, and the bar comes out long.
+     * In a time that is not compound, every such group of the measure is read as a tuplet,
+     * and kept so only where the measure then fits its time.
+     *
+     * @return true if some measure got tuplets, and the stack must be read again
+     */
+    private boolean addMissedTuplets ()
+    {
+        final Rational expected = stack.getExpectedDuration();
+
+        if ((expected == null) || stack.isImplicit() || isCompound()) {
+            return false;
+        }
+
+        boolean added = false;
+
+        for (Measure measure : stack.getMeasures()) {
+            if (!isLong(measure, expected)) {
+                continue;
+            }
+
+            final List<List<AbstractChordInter>> groups = plainGroups(measure);
+
+            if (!groups.isEmpty()) {
+                forced.put(measure, groups);
+                added = true;
+            }
+        }
+
+        return added;
+    }
+
+    //-----------------//
+    // dropUnfitForced //
+    //-----------------//
+    /**
+     * Give up the tuplets added to a measure that still does not fit its time with them.
+     *
+     * @return true if some measure lost them, and the stack must be read again
+     */
+    private boolean dropUnfitForced ()
+    {
+        final Rational expected = stack.getExpectedDuration();
+        boolean dropped = false;
+
+        for (Measure measure : new ArrayList<>(forced.keySet())) {
+            if (fits(measure, expected)) {
+                logger.info("{} long without tuplets, read with {}", measure, forced.get(measure)
+                        .size());
+            } else {
+                forced.remove(measure);
+                dropped = true;
+            }
+        }
+
+        return dropped;
+    }
+
+    //------//
+    // fits //
+    //------//
+    /**
+     * Whether every chord of a measure is timed, every voice ends on or before its expected
+     * duration and one on it.
+     */
+    private static boolean fits (Measure measure,
+                                 Rational expected)
+    {
+        for (AbstractChordInter chord : measure.getStandardChords()) {
+            if ((chord.getVoice() == null) || (chord.getTimeOffset() == null)) {
+                return false;
+            }
+        }
+
+        Rational longest = null;
+
+        for (Voice voice : measure.getVoices()) {
+            if (voice.isMeasureRest()) {
+                continue;
+            }
+
+            final AbstractChordInter last = voice.getLastChord();
+            final Rational end = (last != null) ? last.getEndTime() : null;
+
+            if ((end == null) || (end.compareTo(expected) > 0)) {
+                return false;
+            }
+
+            if ((longest == null) || (end.compareTo(longest) > 0)) {
+                longest = end;
+            }
+        }
+
+        return expected.equals(longest);
+    }
+
+    //------------//
+    // isCompound //
+    //------------//
+    /**
+     * Whether the time of the stack is compound, such as 6/8 or 9/8, where a beam group of
+     * three eighths is a plain beat.
+     */
+    private boolean isCompound ()
+    {
+        TimeRational time = stack.getInferredTime();
+
+        if (time == null) {
+            final AbstractTimeInter ts = stack.getCurrentTimeSignature();
+            time = (ts != null) ? ts.getTimeRational() : null;
+        }
+
+        return (time == null) || ((time.num % 3 == 0) && (time.num > 3) && (time.den >= 8));
+    }
+
+    //--------//
+    // isLong //
+    //--------//
+    /**
+     * Whether some voice of a measure ends after its expected duration.
+     */
+    private static boolean isLong (Measure measure,
+                                   Rational expected)
+    {
+        for (Voice voice : measure.getVoices()) {
+            final AbstractChordInter last = voice.getLastChord();
+            final Rational end = (last != null) ? last.getEndTime() : null;
+
+            if ((end != null) && (end.compareTo(expected) > 0)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    //-------------//
+    // plainGroups //
+    //-------------//
+    /**
+     * The beam groups of a measure that could be unmarked tuplets: 3 or 6 chords, all in
+     * the measure, of equal duration and without a tuplet sign.
+     */
+    private static List<List<AbstractChordInter>> plainGroups (Measure measure)
+    {
+        final Set<AbstractChordInter> chords = measure.getStandardChords();
+        final List<List<AbstractChordInter>> groups = new ArrayList<>();
+
+        for (BeamGroupInter bg : measure.getBeamGroups()) {
+            final List<AbstractChordInter> group = new ArrayList<>(bg.getChords());
+
+            if ((group.size() != 3) && (group.size() != 6)) {
+                continue;
+            }
+
+            Rational dur = null;
+            boolean plain = true;
+
+            for (AbstractChordInter chord : group) {
+                final TupletInter tuplet = chord.getTuplet();
+                final Rational d = chord.getDurationSansTuplet();
+
+                if (!chords.contains(chord) || ((tuplet != null) && !tuplet.isImplicit())
+                        || (d == null) || ((dur != null) && !dur.equals(d))) {
+                    plain = false;
+                    break;
+                }
+
+                dur = d;
+            }
+
+            if (plain) {
+                Collections.sort(group, Inters.byCenterAbscissa);
+                groups.add(group);
+            }
+        }
+
+        return groups;
     }
 
     //------------------//
