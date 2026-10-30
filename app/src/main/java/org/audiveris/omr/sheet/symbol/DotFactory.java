@@ -170,9 +170,9 @@ public class DotFactory
      * ledger is checked.
      * <p>
      * Some editions print the dot of a note on a ledger at the height of the ledger, beyond its
-     * end, as in the left hand chords of Chopin's Winter Wind etude. A clear dot there is kept:
-     * round, not too small, and evaluated with a high grade, for a mere piece of a broken ledger
-     * or stem is not.
+     * end, as in the left hand chords of Chopin's Winter Wind etude. A dot there is kept when it
+     * is clearly one: round, not too small and evaluated with a high grade, which a piece of a
+     * broken ledger or stem is not.
      *
      * @param eval  evaluation result
      * @param glyph the dot glyph to check
