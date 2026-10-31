@@ -25,6 +25,7 @@ import org.audiveris.omr.constant.Constant;
 import org.audiveris.omr.constant.ConstantSet;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SystemInfo;
+import org.audiveris.omr.sheet.vector.VectorChecker;
 import org.audiveris.omr.sheet.rhythm.MeasureFiller;
 import org.audiveris.omr.sig.BeamHeadCleaner;
 import org.audiveris.omr.sig.SigReducer;
@@ -123,6 +124,10 @@ public class LinksStep
         throws StepException
     {
         final StopWatch watch = new StopWatch("LinksStep doSystem #" + system.getId());
+
+        // A vector PDF tells which symbols are really drawn
+        watch.start("VectorChecker");
+        VectorChecker.checkSymbols(system);
 
         // Fill each measure with all detected clef(s) and key if any
         // Because key change detection requires access to effective clef and key
