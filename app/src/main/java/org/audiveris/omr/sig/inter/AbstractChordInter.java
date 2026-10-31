@@ -554,12 +554,13 @@ public abstract class AbstractChordInter
 
                 if (fbn > 0) {
                     /*
-                     * Some mirrored notes exhibit a void note head because the same
-                     * head is shared by a half-note and at the same time by a beam group.
-                     * In the case of the beam/flag side of the mirror, strictly speaking,
-                     * the note head should be considered as black.
+                     * Some notes exhibit a void note head on a beamed or flagged stem, because
+                     * the same head is shared by a half-note and at the same time by a beam
+                     * group (whether mirrored or on one common stem), or because a black head
+                     * was misread. Either way, on the beam/flag side, the note head should be
+                     * considered as black.
                      */
-                    if ((noteShape == Shape.NOTEHEAD_VOID) && (note.getMirror() != null)) {
+                    if (noteShape == Shape.NOTEHEAD_VOID) {
                         dur = Shape.NOTEHEAD_BLACK.getNoteDuration();
                     }
 

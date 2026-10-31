@@ -122,22 +122,7 @@ public abstract class VectorChecker
                 continue;
             }
 
-            final Point center = inter.getCenter();
-            final Rectangle2D spot = new Rectangle2D.Double(
-                    center.x - margin,
-                    center.y - margin,
-                    2 * margin,
-                    2 * margin);
-            boolean same = false;
-
-            for (Symbol symbol : vectorSymbols.intersected(kind.category, spot)) {
-                if ((symbol.kind() == kind) && isCentered(center, symbol, margin)
-                        && sizeFits(inter, symbol)) {
-                    same = true;
-
-                    break;
-                }
-            }
+            final boolean same = isDrawn(vectorSymbols, inter, kind, margin);
 
             (same ? confirmed : rejected).computeIfAbsent(kind.category, c -> new ArrayList<>())
                     .add(inter);
@@ -174,6 +159,53 @@ public abstract class VectorChecker
 
         logger.debug("S#{} vector check: {} confirmed, {} removed", system.getId(), nConfirmed,
                 nRemoved);
+    }
+
+    //---------//
+    // isDrawn //
+    //---------//
+    /**
+     * Tell whether the PDF draws, at the center of a recognized symbol, a symbol of the
+     * same kind.
+     *
+     * @param inter the recognized symbol
+     * @return false if the page is not read from a vector PDF or draws no such symbol there
+     */
+    public static boolean isDrawn (Inter inter)
+    {
+        final Sheet sheet = inter.getSig().getSystem().getSheet();
+        final VectorSymbols vectorSymbols = VectorSymbols.of(sheet);
+        final Kind kind = kindOf(inter);
+
+        if (vectorSymbols.isEmpty() || (kind == null)) {
+            return false;
+        }
+
+        final double margin = sheet.getScale().toPixelsDouble(constants.centerMargin);
+
+        return isDrawn(vectorSymbols, inter, kind, margin);
+    }
+
+    private static boolean isDrawn (VectorSymbols vectorSymbols,
+                                    Inter inter,
+                                    Kind kind,
+                                    double margin)
+    {
+        final Point center = inter.getCenter();
+        final Rectangle2D spot = new Rectangle2D.Double(
+                center.x - margin,
+                center.y - margin,
+                2 * margin,
+                2 * margin);
+
+        for (Symbol symbol : vectorSymbols.intersected(kind.category, spot)) {
+            if ((symbol.kind() == kind) && isCentered(center, symbol, margin)
+                    && sizeFits(inter, symbol)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     //--------------//
