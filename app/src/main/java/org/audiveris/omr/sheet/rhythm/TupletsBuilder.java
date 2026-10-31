@@ -21,6 +21,8 @@
 // </editor-fold>
 package org.audiveris.omr.sheet.rhythm;
 
+import org.audiveris.omr.constant.Constant;
+import org.audiveris.omr.constant.ConstantSet;
 import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.math.GeoUtil;
 import org.audiveris.omr.math.Rational;
@@ -59,6 +61,8 @@ import java.util.TreeSet;
 public class TupletsBuilder
 {
     //~ Static fields/initializers -----------------------------------------------------------------
+
+    private static final Constants constants = new Constants();
 
     private static final Logger logger = LoggerFactory.getLogger(TupletsBuilder.class);
 
@@ -278,6 +282,96 @@ public class TupletsBuilder
     {
         logger.trace("{} getEmbracedChords", tuplet);
 
+        // Staves to try, the staff of the closest head-based chord first, as found among the
+        // candidates that overlap no closer candidate
+        final List<AbstractChordInter> filtered = new ArrayList<>(candidates);
+        filterChordsOnAbscissa(tuplet, filtered);
+
+        final List<Staff> staves = new ArrayList<>();
+        final Staff targetStaff = getTargetStaff(filtered);
+
+        if (targetStaff != null) {
+            staves.add(targetStaff);
+        }
+
+        for (AbstractChordInter chord : candidates) {
+            final Staff staff = chord.getTopStaff();
+
+            if (!chord.isRest() && !staves.contains(staff)) {
+                staves.add(staff);
+            }
+        }
+
+        // A tuplet sign is centered on the chords it embraces. Besides the closest chords, try
+        // the chords closest in abscissa, which a sign far above or below its chords favors,
+        // and keep the better centered. When the sign lies between two staves, the closer staff
+        // is kept only if the sign is centered on its chords there. These other choices must
+        // embrace consecutive chords, and are looked for only for a well recognized sign whose
+        // usual choice exists: a sign it cannot link to chords is no tuplet sign, perhaps a
+        // fingering.
+        final int signX = tuplet.getCenter().x;
+        final Comparator<AbstractChordInter> byAbscissa = Comparator.comparingInt(
+                chord -> Math.abs(chord.getCenter().x - signX));
+        SortedSet<AbstractChordInter> first = null;
+
+        for (int i = 0; i < staves.size(); i++) {
+            final Staff staff = staves.get(i);
+            SortedSet<AbstractChordInter> best = null;
+
+            for (boolean onAbscissa : new boolean[] { false, true }) {
+                final List<AbstractChordInter> staffCandidates = new ArrayList<>(candidates);
+
+                if ((i > 0) || onAbscissa) {
+                    staffCandidates.removeIf(chord -> chord.getTopStaff() != staff);
+                }
+
+                if (onAbscissa) {
+                    staffCandidates.sort(byAbscissa);
+                }
+
+                final SortedSet<AbstractChordInter> chords = embracedOnStaff(
+                        tuplet,
+                        staffCandidates,
+                        staff);
+
+                final boolean usual = (i == 0) && !onAbscissa;
+
+                if (chords == null) {
+                    if (usual) {
+                        return null;
+                    }
+
+                    continue;
+                }
+
+                if (first == null) {
+                    first = chords;
+
+                    if (tuplet.getGrade() < constants.minAlternativeGrade.getValue()) {
+                        return first;
+                    }
+                }
+
+                if (isCentered(tuplet, chords) && (usual || isConsecutive(chords, candidates))
+                        && ((best == null) || (centerShift(tuplet, chords) < centerShift(
+                                tuplet,
+                                best)))) {
+                    best = chords;
+                }
+            }
+
+            if (best != null) {
+                return best;
+            }
+        }
+
+        return first;
+    }
+
+    private static SortedSet<AbstractChordInter> embracedOnStaff (TupletInter tuplet,
+                                                                  List<AbstractChordInter> candidates,
+                                                                  Staff targetStaff)
+    {
         filterChordsOnAbscissa(tuplet, candidates);
 
         // We consider each candidate in turn, with its duration
@@ -285,7 +379,6 @@ public class TupletsBuilder
         final TupletCollector collector = new TupletCollector(
                 tuplet,
                 new TreeSet<>(Inters.byFullAbscissa));
-        final Staff targetStaff = getTargetStaff(candidates);
 
         for (AbstractChordInter chord : candidates) {
             // We assume that chords with 2 staves have their tuplet sign above...
@@ -317,6 +410,75 @@ public class TupletsBuilder
         logger.debug("{} {}", tuplet, collector.getStatusMessage());
 
         return null;
+    }
+
+    //---------------//
+    // isConsecutive //
+    //---------------//
+    /**
+     * Tell whether no other chord of the staff lies between the embraced chords.
+     *
+     * @param chords     the embraced chords, ordered from left to right
+     * @param candidates all the chords around the tuplet sign
+     * @return true if consecutive
+     */
+    private static boolean isConsecutive (SortedSet<AbstractChordInter> chords,
+                                          List<AbstractChordInter> candidates)
+    {
+        final Staff staff = chords.first().getTopStaff();
+        final int left = chords.first().getCenter().x;
+        final int right = chords.last().getCenter().x;
+
+        for (AbstractChordInter chord : candidates) {
+            if (chords.contains(chord) || (chord.getTopStaff() != staff)) {
+                continue;
+            }
+
+            final int x = chord.getCenter().x;
+
+            if ((x > left) && (x < right) && chords.stream().noneMatch(
+                    c -> GeoUtil.xOverlap(c.getBounds(), chord.getBounds()) > 0)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    //------------//
+    // isCentered //
+    //------------//
+    /**
+     * Tell whether the tuplet sign lies about the middle of the embraced chords.
+     *
+     * @param tuplet the tuplet sign
+     * @param chords the embraced chords, ordered from left to right
+     * @return true if centered
+     */
+    private static boolean isCentered (TupletInter tuplet,
+                                       SortedSet<AbstractChordInter> chords)
+    {
+        final double span = chords.last().getCenter().x - chords.first().getCenter().x;
+
+        return centerShift(tuplet, chords) <= constants.maxCenterShift.getValue() * span;
+    }
+
+    //-------------//
+    // centerShift //
+    //-------------//
+    /**
+     * Report the horizontal distance from the tuplet sign to the middle of the chords.
+     *
+     * @param tuplet the tuplet sign
+     * @param chords the embraced chords, ordered from left to right
+     * @return the distance, in pixels
+     */
+    private static double centerShift (TupletInter tuplet,
+                                       SortedSet<AbstractChordInter> chords)
+    {
+        final double middle = (chords.first().getCenter().x + chords.last().getCenter().x) / 2;
+
+        return Math.abs(tuplet.getCenter().x - middle);
     }
 
     //----------------//
@@ -565,5 +727,21 @@ public class TupletsBuilder
             TOO_MANY,
             OUTSIDE;
         }
+    }
+
+    //-----------//
+    // Constants //
+    //-----------//
+    private static class Constants
+            extends ConstantSet
+    {
+        private final Constant.Ratio maxCenterShift = new Constant.Ratio(
+                0.25,
+                "Maximum shift of a tuplet sign from the middle of its chords, as a ratio of their"
+                        + " span");
+
+        private final Constant.Ratio minAlternativeGrade = new Constant.Ratio(
+                0.6,
+                "Minimum grade of a tuplet sign to look for other chords than the closest ones");
     }
 }
