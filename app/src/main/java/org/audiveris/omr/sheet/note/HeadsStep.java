@@ -26,6 +26,7 @@ import org.audiveris.omr.image.DistanceTable;
 import org.audiveris.omr.sheet.Picture;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SystemInfo;
+import org.audiveris.omr.sheet.vector.VectorChecker;
 import org.audiveris.omr.step.AbstractSystemStep;
 import org.audiveris.omr.step.StepException;
 
@@ -114,6 +115,9 @@ public class HeadsStep
                 context.tallies.get(system),
                 context.stdDumped,
                 context.drumDumped).buildHeads();
+
+        // A vector PDF tells which heads are really drawn
+        VectorChecker.checkHeads(system);
     }
 
     //~ Inner Classes ------------------------------------------------------------------------------
