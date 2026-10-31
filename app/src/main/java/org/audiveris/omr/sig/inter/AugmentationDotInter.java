@@ -457,6 +457,12 @@ public class AugmentationDotInter
             }
         }
 
+        for (Link link : links) {
+            if (link.partner.getCenter().y > dotCenter.y) {
+                return link;
+            }
+        }
+
         return (!links.isEmpty()) ? links.get(0) : null;
     }
 
