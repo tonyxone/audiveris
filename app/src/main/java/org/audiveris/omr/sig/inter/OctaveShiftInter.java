@@ -83,6 +83,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.swing.SwingUtilities;
 import javax.xml.bind.annotation.XmlAttribute;
@@ -127,6 +129,10 @@ public class OctaveShiftInter
     private static final Constants constants = new Constants();
 
     private static final Logger logger = LoggerFactory.getLogger(OctaveShiftInter.class);
+
+    /** A word that is the value of an octave sign. */
+    private static final Pattern OCTAVE_WORD = Pattern.compile(
+            "\\(?(8|15|22)(va|vb|ma|mb|ba)?\\)?");
 
     /** For comparing interpretations by increasing staff id. */
     public static final Comparator<Inter> byStaffId = (Inter i1,
@@ -931,6 +937,63 @@ public class OctaveShiftInter
         os.setStaff(staff);
 
         return os;
+    }
+
+    //-----------//
+    // fromWords //
+    //-----------//
+    /**
+     * Read as octave signs the words "8", "8va", "15ma"... of a system that stand alone
+     * before a line: the text recognition took their value for a word, and the sign was
+     * lost with the shift of every note under its line.
+     *
+     * @param system the system to process
+     */
+    public static void fromWords (SystemInfo system)
+    {
+        final Sheet sheet = system.getSheet();
+        final ByteProcessor buf = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
+        final int interline = sheet.getScale().getInterline();
+
+        for (Inter inter : system.getSig().inters(WordInter.class)) {
+            final WordInter word = (WordInter) inter;
+            final Matcher matcher = OCTAVE_WORD.matcher(word.getValue());
+            final Glyph glyph = word.getGlyph();
+            final InterEnsemble sentence = word.getEnsemble();
+
+            if (!matcher.matches() || (glyph == null) || ((sentence != null) && (sentence
+                    .getMembers().size() > 1))) {
+                continue;
+            }
+
+            final Staff staff = sheet.getStaffManager().getClosestStaff(glyph.getCenter());
+
+            if ((staff == null) || (staff.getSystem() != system)) {
+                continue;
+            }
+
+            final Rectangle box = glyph.getBounds();
+            final Integer end = lineEnd(buf, box, interline, staff.getAbscissa(
+                    HorizontalSide.RIGHT));
+
+            if ((end == null) || (end - (box.x + box.width) < 2 * interline)) {
+                continue;
+            }
+
+            final Shape shape = switch (matcher.group(1)) {
+                case "15" -> Shape.QUINDICESIMA;
+                case "22" -> Shape.VENTIDUESIMA;
+                default -> Shape.OTTAVA;
+            };
+
+            final Inter os = create(glyph, shape, word.getGrade(), staff);
+
+            if (os != null) {
+                logger.debug("{} read as {}", word, os);
+                word.remove();
+                system.getSig().addVertex(os);
+            }
+        }
     }
 
     //--------------//
