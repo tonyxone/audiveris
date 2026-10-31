@@ -23,9 +23,15 @@ package org.audiveris.omr.sheet.vector;
 
 import org.audiveris.omr.constant.Constant;
 import org.audiveris.omr.constant.ConstantSet;
+import org.audiveris.omr.glyph.Glyph;
 import org.audiveris.omr.glyph.Grades;
 import org.audiveris.omr.glyph.Shape;
+import static org.audiveris.omr.run.Orientation.VERTICAL;
+import org.audiveris.omr.run.RunTable;
+import org.audiveris.omr.run.RunTableFactory;
+import org.audiveris.omr.sheet.Picture;
 import org.audiveris.omr.sheet.Scale;
+import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.vector.VectorSymbols.Category;
 import org.audiveris.omr.sheet.vector.VectorSymbols.Kind;
@@ -42,9 +48,13 @@ import org.audiveris.omr.sig.inter.RestInter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import ij.process.ByteProcessor;
+
 import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
@@ -166,6 +176,67 @@ public abstract class VectorChecker
                 nRemoved);
     }
 
+    //--------------//
+    // missedGlyphs //
+    //--------------//
+    /**
+     * Report a glyph for each symbol of a shape the PDF draws in a system where the image
+     * analysis found no candidate: its black pixels within the drawn symbol bounds.
+     * <p>
+     * A dot drawn close to a note head, for instance, gets erased with the head before symbols
+     * are looked for.
+     *
+     * @param system the system to process
+     * @param shape  the shape of symbol
+     * @param known  the bounds of candidates already found
+     * @return the glyphs of the missed symbols
+     */
+    public static List<Glyph> missedGlyphs (SystemInfo system,
+                                            Shape shape,
+                                            Collection<Rectangle> known)
+    {
+        final Sheet sheet = system.getSheet();
+        final VectorSymbols vectorSymbols = VectorSymbols.of(sheet);
+        final Kind kind = kindOf(shape);
+        final List<Glyph> glyphs = new ArrayList<>();
+
+        if (vectorSymbols.isEmpty() || (kind == null)) {
+            return glyphs;
+        }
+
+        final ByteProcessor binary = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
+        final Rectangle image = new Rectangle(0, 0, binary.getWidth(), binary.getHeight());
+
+        for (Symbol symbol : vectorSymbols.intersected(kind.category, system.getBounds())) {
+            if ((symbol.kind() != kind) || !system.getArea().contains(
+                    symbol.bounds().getCenterX(),
+                    symbol.bounds().getCenterY())) {
+                continue;
+            }
+
+            final Rectangle roi = symbol.bounds().getBounds().intersection(image);
+
+            if (roi.isEmpty() || known.stream().anyMatch(box -> box.intersects(roi))) {
+                continue;
+            }
+
+            final Point offset = new Point();
+            final RunTable table = new RunTableFactory(VERTICAL).createTable(binary, roi).trim(
+                    offset);
+
+            if (table.getWeight() == 0) {
+                continue;
+            }
+
+            glyphs.add(sheet.getGlyphIndex().registerOriginal(
+                    new Glyph(roi.x + offset.x, roi.y + offset.y, table)));
+        }
+
+        logger.debug("S#{} {} missed {}", system.getId(), glyphs.size(), shape);
+
+        return glyphs;
+    }
+
     //------------//
     // isCentered //
     //------------//
@@ -231,12 +302,17 @@ public abstract class VectorChecker
             return null; // Key signatures are read on their own
         }
 
-        final Shape shape = inter.getShape();
+        return (inter.getShape() != null) ? kindOf(inter.getShape()) : null;
+    }
 
-        if (shape == null) {
-            return null;
-        }
-
+    /**
+     * Report the kind of drawn symbol a shape stands for.
+     *
+     * @param shape the recognized shape
+     * @return its kind, or null if not checked
+     */
+    private static Kind kindOf (Shape shape)
+    {
         return switch (shape) {
             case NOTEHEAD_BLACK, NOTEHEAD_BLACK_SMALL -> Kind.HEAD_BLACK;
             case NOTEHEAD_VOID, NOTEHEAD_VOID_SMALL -> Kind.HEAD_VOID;

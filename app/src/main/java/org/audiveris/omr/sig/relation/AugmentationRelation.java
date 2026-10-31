@@ -170,7 +170,10 @@ public class AugmentationRelation
 
         if (note != null) {
             AbstractChordInter chord = note.getChord();
-            chord.countDots();
+
+            if (chord != null) { // A rest may get its chord only later
+                chord.countDots();
+            }
         }
     }
 

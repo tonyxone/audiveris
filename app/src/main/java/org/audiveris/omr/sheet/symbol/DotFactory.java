@@ -38,6 +38,7 @@ import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.rhythm.Measure;
 import org.audiveris.omr.sheet.rhythm.MeasureStack;
+import org.audiveris.omr.sheet.vector.VectorChecker;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.ArticulationInter;
 import org.audiveris.omr.sig.inter.AugmentationDotInter;
@@ -626,6 +627,14 @@ public class DotFactory
      */
     public void lateDotChecks ()
     {
+        // Augmentation dots a vector PDF draws where the image analysis found no dot
+        final List<Rectangle> known = new ArrayList<>();
+        dots.forEach(dot -> known.add(dot.getBounds()));
+
+        for (Glyph glyph : VectorChecker.missedGlyphs(system, Shape.AUGMENTATION_DOT, known)) {
+            dots.add(new GlyphDot(new Evaluation(Shape.AUGMENTATION_DOT, 1.0), glyph));
+        }
+
         Collections.sort(dots, Dot.byAbscissa);
 
         // Run all late checks
