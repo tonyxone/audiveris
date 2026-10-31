@@ -21,6 +21,7 @@
 // </editor-fold>
 package org.audiveris.omr.sheet.rhythm;
 
+import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.math.Rational;
 import org.audiveris.omr.score.TimeRational;
 import org.audiveris.omr.sheet.Staff;
@@ -329,6 +330,10 @@ public class StackRhythm
         try {
             boolean ok = doProcess();
 
+            if (dropBeatTuplets()) {
+                ok = doProcess();
+            }
+
             if (dropUnfitTuplets()) {
                 ok = doProcess();
             }
@@ -383,7 +388,7 @@ public class StackRhythm
         }
 
         // In a compound time, a group that makes a beat is a plain beat
-        final boolean compound = (current.num % 3 == 0) && (current.num > 3) && (current.den >= 8);
+        final boolean compound = isCompound(current);
         final Rational beat = compound ? new Rational(3, current.den) : null;
 
         final List<Rectangle> twos = compound ? dupletSigns() : Collections.emptyList();
@@ -702,6 +707,60 @@ public class StackRhythm
         return groups;
     }
 
+    //-----------------//
+    // dropBeatTuplets //
+    //-----------------//
+    /**
+     * Drop the triplet signs of a measure that comes out short, where the notes they embrace
+     * make a beat of a compound time.
+     * <p>
+     * Three eighths make a beat of 12/8 with no sign: a "3" over them is a fingering, such as
+     * the one in the first bar of Chopin's Nocturne op. 9 no. 2.
+     *
+     * @return true if some measure lost tuplets, and the stack must be read again
+     */
+    private boolean dropBeatTuplets ()
+    {
+        final Rational expected = stack.getExpectedDuration();
+        final TimeRational current = currentTime();
+
+        if ((expected == null) || stack.isImplicit() || (current == null) || !isCompound(
+                current)) {
+            return false;
+        }
+
+        final Rational beat = new Rational(3, current.den);
+        boolean dropped = false;
+
+        for (Measure measure : stack.getMeasures()) {
+            if (!isShort(measure, expected)) {
+                continue;
+            }
+
+            for (TupletInter tuplet : new ArrayList<>(measure.getTuplets())) {
+                if (tuplet.isImplicit() || tuplet.isManual()
+                        || (tuplet.getShape() != Shape.TUPLET_THREE)) {
+                    continue;
+                }
+
+                Rational total = Rational.ZERO;
+
+                for (AbstractChordInter chord : tuplet.getChords()) {
+                    final Rational d = chord.getDurationSansTuplet();
+                    total = (d != null) ? total.plus(d) : Rational.MAX_VALUE;
+                }
+
+                if (total.equals(beat)) {
+                    logger.info("{} short with {} over a beat, read without it", measure, tuplet);
+                    tuplet.remove();
+                    dropped = true;
+                }
+            }
+        }
+
+        return dropped;
+    }
+
     //------------------//
     // dropUnfitTuplets //
     //------------------//
@@ -769,6 +828,10 @@ public class StackRhythm
     /**
      * Whether, with the provided tuplets dropped, every voice of a measure ends on or before
      * its expected duration and one on it, and chords of a slot still start together.
+     * <p>
+     * A voice that starts within the measure starts with the chords of another voice in its
+     * first slot, which the dropped tuplets may move: a left hand voice starting under a
+     * right hand note moves with it.
      */
     private static boolean fitsWithout (Measure measure,
                                         Collection<TupletInter> tuplets,
@@ -776,6 +839,7 @@ public class StackRhythm
     {
         Rational longest = null;
         final Map<AbstractChordInter, Rational> starts = new LinkedHashMap<>();
+        final List<Voice> voices = new ArrayList<>();
 
         for (Voice voice : measure.getVoices()) {
             if (voice.isMeasureRest()) {
@@ -788,7 +852,29 @@ public class StackRhythm
                 return false;
             }
 
-            Rational end = chords.get(0).getTimeOffset();
+            voices.add(voice);
+        }
+
+        while (!voices.isEmpty()) {
+            // Next voice: one starting the measure, or on a slot already timed
+            Voice voice = voices.get(0);
+            Rational start = voice.getChords().get(0).getTimeOffset();
+
+            for (Voice v : voices) {
+                final AbstractChordInter first = v.getChords().get(0);
+                final Rational known = startInSlot(first, starts);
+
+                if ((known != null) || first.getTimeOffset().equals(Rational.ZERO)) {
+                    voice = v;
+                    start = (known != null) ? known : Rational.ZERO;
+                    break;
+                }
+            }
+
+            voices.remove(voice);
+
+            final List<AbstractChordInter> chords = voice.getChords();
+            Rational end = start;
 
             for (AbstractChordInter chord : chords) {
                 final Rational dur = tuplets.contains(chord.getTuplet()) ? chord
@@ -828,6 +914,41 @@ public class StackRhythm
         }
 
         return expected.equals(longest);
+    }
+
+    //-------------//
+    // startInSlot //
+    //-------------//
+    /**
+     * The start already found for another chord of the slot of a chord, if any.
+     */
+    private static Rational startInSlot (AbstractChordInter chord,
+                                         Map<AbstractChordInter, Rational> starts)
+    {
+        final Slot slot = chord.getSlot();
+
+        if (slot != null) {
+            for (AbstractChordInter other : slot.getChords()) {
+                final Rational start = starts.get(other);
+
+                if (start != null) {
+                    return start;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    //------------//
+    // isCompound //
+    //------------//
+    /**
+     * Whether a time is compound: its beat is three of its units, as in 6/8 or 12/8.
+     */
+    private static boolean isCompound (TimeRational time)
+    {
+        return (time.num % 3 == 0) && (time.num > 3) && (time.den >= 8);
     }
 
     //---------//
