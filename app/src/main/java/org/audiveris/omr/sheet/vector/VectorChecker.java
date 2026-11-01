@@ -110,6 +110,7 @@ public abstract class VectorChecker
         // Verdict on each checked inter, per category
         final Map<Category, List<Inter>> confirmed = new EnumMap<>(Category.class);
         final Map<Category, List<Inter>> rejected = new EnumMap<>(Category.class);
+        final Map<Category, List<Inter>> confused = new EnumMap<>(Category.class);
 
         for (Inter inter : inters) {
             if (inter.isRemoved()) {
@@ -123,23 +124,30 @@ public abstract class VectorChecker
             }
 
             final boolean same = isDrawn(vectorSymbols, inter, kind, margin);
-
-            (same ? confirmed : rejected).computeIfAbsent(kind.category, c -> new ArrayList<>())
-                    .add(inter);
+            final Map<Category, List<Inter>> verdict = same ? confirmed
+                    : ((kind.category == Category.DOT)
+                            && isConfused(vectorSymbols, inter, kind, margin)) ? confused
+                                    : rejected;
+            verdict.computeIfAbsent(kind.category, c -> new ArrayList<>()).add(inter);
         }
 
         // A category is trusted only where the PDF draws most of what was recognized: a page may
-        // draw some symbols with a SMuFL font and others, such as its note heads, with another
+        // draw some symbols with a SMuFL font and others, such as its note heads, with another.
+        // A dot read as a staccato, or the reverse, shows the PDF draws dots: it does not count
+        // against trust, but is removed.
         int nConfirmed = 0;
         int nRemoved = 0;
 
         for (Category category : Category.values()) {
             final List<Inter> good = confirmed.getOrDefault(category, Collections.emptyList());
-            final List<Inter> bad = rejected.getOrDefault(category, Collections.emptyList());
+            final List<Inter> bad = new ArrayList<>(
+                    rejected.getOrDefault(category, Collections.emptyList()));
 
             if (good.size() < constants.minAgreement.getValue() * (good.size() + bad.size())) {
                 continue;
             }
+
+            bad.addAll(confused.getOrDefault(category, Collections.emptyList()));
 
             for (Inter inter : good) {
                 inter.setGrade(Math.max(inter.getGrade(), Grades.intrinsicRatio));
@@ -201,6 +209,34 @@ public abstract class VectorChecker
         for (Symbol symbol : vectorSymbols.intersected(kind.category, spot)) {
             if ((symbol.kind() == kind) && isCentered(center, symbol, margin)
                     && sizeFits(inter, symbol)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    //------------//
+    // isConfused //
+    //------------//
+    /**
+     * Tell whether the PDF draws, at the center of a recognized symbol, a symbol of the same
+     * category but of another kind, such as a dot where a staccato was read.
+     */
+    private static boolean isConfused (VectorSymbols vectorSymbols,
+                                       Inter inter,
+                                       Kind kind,
+                                       double margin)
+    {
+        final Point center = inter.getCenter();
+        final Rectangle2D spot = new Rectangle2D.Double(
+                center.x - margin,
+                center.y - margin,
+                2 * margin,
+                2 * margin);
+
+        for (Symbol symbol : vectorSymbols.intersected(kind.category, spot)) {
+            if ((symbol.kind() != kind) && isCentered(center, symbol, margin)) {
                 return true;
             }
         }
