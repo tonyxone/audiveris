@@ -114,6 +114,9 @@ public class MeasureRhythm
     /** Switch for support of implicit tuplet signs. */
     private final boolean implicitTuplets;
 
+    /** Should chords map to the voice ending first after the previous slot?. */
+    private final boolean strict;
+
     /** Companion in charge of chords relationships and narrow slots. */
     private SlotsRetriever narrowSlotsRetriever;
 
@@ -159,7 +162,7 @@ public class MeasureRhythm
                           int[] tuning,
                           boolean implicit)
     {
-        this(measure, tuning, implicit, Collections.emptyList());
+        this(measure, tuning, implicit, Collections.emptyList(), false);
     }
 
     /**
@@ -171,14 +174,17 @@ public class MeasureRhythm
      * @param implicit false for no implicit tuplets in this measure, whatever the switch
      * @param forced   the groups of chords to read as implicit tuplets, ignored without
      *                 implicit tuplets
+     * @param strict   true to map each chord to the voice ending first after the previous slot
      */
     public MeasureRhythm (Measure measure,
                           int[] tuning,
                           boolean implicit,
-                          List<List<AbstractChordInter>> forced)
+                          List<List<AbstractChordInter>> forced,
+                          boolean strict)
     {
         this.measure = measure;
         forcedGroups = forced;
+        this.strict = strict;
 
         final Part part = measure.getPart();
         final Sheet sheet = measure.getStack().getSystem().getSheet();
@@ -1599,6 +1605,18 @@ public class MeasureRhythm
                 for (MeasureSlot narrow : slot.getMembers()) {
                     final Rational slotTime = narrow.getTimeOffset();
 
+                    if (strict && (slotTime == null)) {
+                        final ChordPair late = lateMapping(narrow, actives);
+
+                        if (late != null) {
+                            logger.debug("{} strict: discarding {}", slot, late);
+                            blackList.add(late);
+                            done = false;
+
+                            continue Iteration;
+                        }
+                    }
+
                     if (slotTime != null) {
                         final List<AbstractChordInter> narrowChords = narrow.getChords();
                         final List<AbstractChordInter> setChords = getSetChords(narrowChords);
@@ -1720,6 +1738,80 @@ public class MeasureRhythm
 
                         return true;
                     }
+                }
+            }
+
+            return false;
+        }
+
+        //-------------//
+        // lateMapping //
+        //-------------//
+        /**
+         * Report a mapping of the provided narrow slot that starts its chord too late or too
+         * early: not after the previous slots, or after another voice left free has ended.
+         * <p>
+         * Chords of a hand may continue a voice of the other hand, as in arpeggios across the
+         * staves, and a voice may leave gaps with no rest printed.
+         *
+         * @param narrow  the narrow slot
+         * @param actives the active chords
+         * @return the first such pair, or null
+         */
+        private ChordPair lateMapping (MeasureSlot narrow,
+                                       List<AbstractChordInter> actives)
+        {
+            Rational previous = null;
+
+            for (CompoundSlot prev : slots.subList(0, slot.id - 1)) {
+                for (MeasureSlot member : prev.getMembers()) {
+                    final Rational time = member.getTimeOffset();
+
+                    if ((time != null) && ((previous == null) || (time.compareTo(previous) > 0))) {
+                        previous = time;
+                    }
+                }
+            }
+
+            final List<ChordPair> pairs = mapping.pairsOf(narrow.getChords());
+
+            for (ChordPair pair : pairs) {
+                final Rational end = pair.active.getEndTime();
+
+                if ((end == null) || nextList.contains(pair) || blackList.contains(pair)) {
+                    continue;
+                }
+
+                if ((previous != null) && (end.compareTo(previous) <= 0)) {
+                    return pair;
+                }
+
+                for (AbstractChordInter other : actives) {
+                    final Rational otherEnd = other.getEndTime();
+
+                    if ((other != pair.active) && (otherEnd != null) && !isMapped(other)
+                            && !blackList.contains(new ChordPair(pair.rookie, other, null))
+                            && (otherEnd.compareTo(end) < 0) && ((previous == null) || (otherEnd
+                                    .compareTo(previous) > 0))) {
+                        return pair;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        //----------//
+        // isMapped //
+        //----------//
+        /**
+         * Tell whether an active chord is taken by the current mapping.
+         */
+        private boolean isMapped (AbstractChordInter active)
+        {
+            for (ChordPair pair : mapping.pairs) {
+                if (pair.active == active) {
+                    return true;
                 }
             }
 

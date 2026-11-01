@@ -86,6 +86,12 @@ public class StackRhythm
     /** Measures to read with beam groups as implicit tuplets: they came out long without. */
     private final Map<Measure, List<List<AbstractChordInter>>> forced = new LinkedHashMap<>();
 
+    /** Measures to read mapping each chord to the voice ending first: off their time otherwise. */
+    private final Set<Measure> strict = new LinkedHashSet<>();
+
+    /** The strict measures whose forced tuplets go with them. */
+    private final Set<Measure> strictForced = new LinkedHashSet<>();
+
     /** The time in force, as the page reading found it, if known. */
     private TimeRational time;
 
@@ -207,7 +213,8 @@ public class StackRhythm
                     measure,
                     tuning,
                     !noImplicit.contains(measure),
-                    forced.getOrDefault(measure, Collections.emptyList())).process();
+                    forced.getOrDefault(measure, Collections.emptyList()),
+                    strict.contains(measure)).process();
 
             if (!measureOk) {
                 measure.setAbnormal(true);
@@ -346,6 +353,14 @@ public class StackRhythm
                 }
             }
 
+            if (retryStrict()) {
+                ok = doProcess();
+
+                if (dropUnfitStrict()) {
+                    ok = doProcess();
+                }
+            }
+
             if (!ok) {
                 logger.info("{}{} no correct rhythm", stack.getSystem().getLogPrefix(), stack);
             }
@@ -427,6 +442,117 @@ public class StackRhythm
         }
 
         return added;
+    }
+
+    //-------------//
+    // retryStrict //
+    //-------------//
+    /**
+     * Read again, mapping each chord to the voice ending first, the measures still off
+     * their time.
+     * <p>
+     * Voice mapping favors a voice of the same staff, even one that ends later. Across an
+     * arpeggio going from one hand to the other, or a voice with gaps and no rest printed, that
+     * puts chords too late. In a measure that comes out long, the beam groups of 3 or 6 are also
+     * read as tuplets, whose sign may be printed on the first group only.
+     * Each measure is kept that way only if it then fits.
+     *
+     * @return true if some measure is to be read again
+     */
+    private boolean retryStrict ()
+    {
+        final Rational expected = stack.getExpectedDuration();
+
+        if ((expected == null) || stack.isImplicit()) {
+            return false;
+        }
+
+        final TimeRational current = currentTime();
+        final Rational beat = ((current != null) && isCompound(current)) ? new Rational(
+                3,
+                current.den) : null;
+
+        for (Measure measure : stack.getMeasures()) {
+            if (!fits(measure, expected) && !measure.getStandardChords().isEmpty()) {
+                strict.add(measure);
+
+                if (isLong(measure, expected) && !forced.containsKey(measure)) {
+                    final List<List<AbstractChordInter>> groups = new ArrayList<>();
+
+                    for (List<AbstractChordInter> group : plainGroups(measure)) {
+                        final Rational total = group.get(0).getDurationSansTuplet().times(group
+                                .size());
+
+                        if (!total.equals(beat)) {
+                            groups.add(group);
+                        }
+                    }
+
+                    if (!groups.isEmpty()) {
+                        forced.put(measure, groups);
+                        strictForced.add(measure);
+                    }
+                }
+            }
+        }
+
+        return !strict.isEmpty();
+    }
+
+    //-----------------//
+    // dropUnfitStrict //
+    //-----------------//
+    /**
+     * Give up the strict reading of a measure that still does not fit its time with it.
+     *
+     * @return true if some measure gave it up, and the stack must be read again
+     */
+    private boolean dropUnfitStrict ()
+    {
+        final Rational expected = stack.getExpectedDuration();
+        boolean dropped = false;
+
+        for (Measure measure : new ArrayList<>(strict)) {
+            if (fits(measure, expected) && isSequential(measure)) {
+                logger.info("{} off its time, read with strict voices", measure);
+            } else {
+                strict.remove(measure);
+
+                if (strictForced.remove(measure)) {
+                    forced.remove(measure);
+                }
+
+                dropped = true;
+            }
+        }
+
+        return dropped;
+    }
+
+    //--------------//
+    // isSequential //
+    //--------------//
+    /**
+     * Whether, in every voice of a measure, each chord starts once the previous one has ended.
+     * Otherwise two chords can share a slot of the voice, and one of them gets lost.
+     */
+    private static boolean isSequential (Measure measure)
+    {
+        for (Voice voice : measure.getVoices()) {
+            Rational end = null;
+
+            for (AbstractChordInter chord : voice.getChords()) {
+                final Rational start = chord.getTimeOffset();
+
+                if ((start == null) || ((end != null) && (start.compareTo(end) < 0))) {
+                    return false;
+                }
+
+                end = chord.getEndTime();
+            }
+        }
+
+        return true;
     }
 
     //-----------------//
