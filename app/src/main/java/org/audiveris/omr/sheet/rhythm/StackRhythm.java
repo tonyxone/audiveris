@@ -355,10 +355,18 @@ public class StackRhythm
                 ok = doProcess();
             }
 
+            final Map<Measure, Rational> endBefore = new LinkedHashMap<>();
+            final Map<Measure, Integer> untimedBefore = new LinkedHashMap<>();
+
+            for (Measure measure : stack.getMeasures()) {
+                endBefore.put(measure, longestEnd(measure));
+                untimedBefore.put(measure, untimedHeadChords(measure));
+            }
+
             if (addMissedTuplets()) {
                 ok = doProcess();
 
-                if (dropUnfitForced()) {
+                if (dropUnfitForced(endBefore, untimedBefore)) {
                     ok = doProcess();
                 }
             }
@@ -860,11 +868,19 @@ public class StackRhythm
     // dropUnfitForced //
     //-----------------//
     /**
-     * Give up the tuplets added to a measure that still does not fit its time with them.
+     * Give up the tuplets added to a measure that still does not fit its time with them, unless
+     * they are all of 6 chords, a less doubtful reading than 3, and make it better: it ends no
+     * later, no more head chords are left without a time, and either fewer are or its excess is
+     * at least halved.
+     * A chord without a time is not exported at all, and a misread chord of the other hand, say,
+     * should not cost the tuplets of this one.
      *
+     * @param endBefore     the end of each measure before
+     * @param untimedBefore the count of untimed head chords of each measure before
      * @return true if some measure lost them, and the stack must be read again
      */
-    private boolean dropUnfitForced ()
+    private boolean dropUnfitForced (Map<Measure, Rational> endBefore,
+                                     Map<Measure, Integer> untimedBefore)
     {
         final Rational expected = stack.getExpectedDuration();
         boolean dropped = false;
@@ -873,6 +889,13 @@ public class StackRhythm
             if (fits(measure, expected)) {
                 logger.info("{} off its time without tuplets, read with {}", measure, forced.get(measure)
                         .size());
+            } else if (forced.get(measure).stream().allMatch(group -> group.size() == 6) && isBetter(
+                    measure,
+                    expected,
+                    endBefore.get(measure),
+                    untimedBefore.get(measure))) {
+                logger.info("{} still off its time, better read with {}", measure, forced.get(
+                        measure).size());
             } else {
                 forced.remove(measure);
                 dropped = true;
@@ -880,6 +903,52 @@ public class StackRhythm
         }
 
         return dropped;
+    }
+
+    private static boolean isBetter (Measure measure,
+                                     Rational expected,
+                                     Rational endBefore,
+                                     int untimedBefore)
+    {
+        final Rational end = longestEnd(measure);
+        final int untimed = untimedHeadChords(measure);
+
+        if ((end == null) || (endBefore == null) || (end.compareTo(endBefore) > 0)
+                || (untimed > untimedBefore)) {
+            return false;
+        }
+
+        return (untimed < untimedBefore) || (end.minus(expected).times(2).compareTo(
+                endBefore.minus(expected)) <= 0);
+    }
+
+    private static int untimedHeadChords (Measure measure)
+    {
+        int count = 0;
+
+        for (AbstractChordInter chord : measure.getStandardChords()) {
+            if (!chord.isRest() && ((chord.getVoice() == null) || (chord.getTimeOffset() == null))) {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static Rational longestEnd (Measure measure)
+    {
+        Rational longest = null;
+
+        for (Voice voice : measure.getVoices()) {
+            final AbstractChordInter last = voice.isMeasureRest() ? null : voice.getLastChord();
+            final Rational end = (last != null) ? last.getEndTime() : null;
+
+            if ((end != null) && ((longest == null) || (end.compareTo(longest) > 0))) {
+                longest = end;
+            }
+        }
+
+        return longest;
     }
 
     //------//
