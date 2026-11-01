@@ -223,6 +223,11 @@ public class SlotsRetriever
                 return false;
             }
 
+            // A head between the outer heads of the other chord, on its stem, is shifted aside
+            if (isWithin(ch1, ch2) || isWithin(ch2, ch1)) {
+                return true;
+            }
+
             // Similar pitches?
             for (Inter i1 : ch1.getNotes()) {
                 final HeadInter h1 = (HeadInter) i1;
@@ -250,6 +255,39 @@ public class SlotsRetriever
 
         // Check abscissa shift between heads
         return Math.abs(ch1.getHeadLocation().x - ch2.getHeadLocation().x) <= params.maxSlotDxLow;
+    }
+
+    //----------//
+    // isWithin //
+    //----------//
+    /**
+     * Tell whether a head of a chord lies strictly between the outer heads of another chord.
+     *
+     * @param chord the chord with heads
+     * @param other the other chord
+     * @return true if so
+     */
+    private static boolean isWithin (AbstractChordInter chord,
+                                     AbstractChordInter other)
+    {
+        int min = Integer.MAX_VALUE;
+        int max = Integer.MIN_VALUE;
+
+        for (Inter note : other.getNotes()) {
+            final int p = ((HeadInter) note).getIntegerPitch();
+            min = Math.min(min, p);
+            max = Math.max(max, p);
+        }
+
+        for (Inter note : chord.getNotes()) {
+            final int p = ((HeadInter) note).getIntegerPitch();
+
+            if ((p > min) && (p < max)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     //-----------------------//
