@@ -42,6 +42,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -63,6 +65,9 @@ public class StackRhythm
     //~ Static fields/initializers -----------------------------------------------------------------
 
     private static final Logger logger = LoggerFactory.getLogger(StackRhythm.class);
+
+    /** Chords closer than this, in interlines, are at the same abscissa. */
+    private static final double SAME_ABSCISSA = 0.25;
 
     /**
      * Alternative voice penalties {noLink, stemDiffTwo, staffDiff}, tried in turn on a stack
@@ -359,6 +364,7 @@ public class StackRhythm
             }
 
             ok = retryOffTime(ok);
+            ok = retryOutOfOrder(ok);
 
             if (!ok) {
                 logger.info("{}{} no correct rhythm", stack.getSystem().getLogPrefix(), stack);
@@ -518,6 +524,222 @@ public class StackRhythm
         }
 
         return dropped ? doProcess() : result;
+    }
+
+    //-----------------//
+    // retryOutOfOrder //
+    //-----------------//
+    /**
+     * Read again the measures whose chords do not go on in time as they go on across the page.
+     * <p>
+     * Such a measure may well add up: a chord continuing the wrong voice, or implicit tuplets
+     * where none is printed, leaves its total right but plays notes at the wrong time.
+     * It is tried with strict voices, without implicit tuplets, then with both, and kept that
+     * way only if it then fits its time, in order. Chords at one abscissa with different times
+     * are not enough to doubt the voices, a missed dot does that too: strict voices are not
+     * tried, and in a measure that fits already most of these chords must keep their time.
+     *
+     * @param ok the current status
+     * @return the new status
+     */
+    private boolean retryOutOfOrder (boolean ok)
+    {
+        final Rational expected = stack.getExpectedDuration();
+
+        if ((expected == null) || stack.isImplicit()) {
+            return ok;
+        }
+
+        final List<Measure> remaining = new ArrayList<>();
+        final Map<Measure, Map<AbstractChordInter, Rational>> slight = new LinkedHashMap<>();
+
+        for (Measure measure : stack.getMeasures()) {
+            final int disorder = disorder(measure);
+
+            if ((disorder > 0) && !strict.contains(measure) && !noImplicit.contains(measure)) {
+                remaining.add(measure);
+
+                if (disorder == 1) {
+                    slight.put(
+                            measure,
+                            fits(measure, expected) ? startTimes(measure) : Collections.emptyMap());
+                }
+            }
+        }
+
+        if (remaining.isEmpty()) {
+            return ok;
+        }
+
+        boolean result = ok;
+        final boolean[][] trials = {{true, false}, {false, true}, {true, true}};
+
+        for (boolean[] trial : trials) {
+            for (Measure measure : remaining) {
+                if (!trial[0] || !slight.containsKey(measure)) {
+                    setRetry(strict, measure, trial[0]);
+                    setRetry(noImplicit, measure, trial[1]);
+                }
+            }
+
+            result = doProcess();
+
+            for (Iterator<Measure> it = remaining.iterator(); it.hasNext();) {
+                final Measure measure = it.next();
+
+                if ((!trial[0] || !slight.containsKey(measure)) && fits(measure, expected)
+                        && isSequential(measure) && (disorder(measure) == 0)
+                        && (!slight.containsKey(measure) || keepsMost(measure, slight.get(measure)))) {
+                    logger.info("{} out of order, read again", measure);
+                    it.remove();
+                }
+            }
+
+            if (remaining.isEmpty()) {
+                return result;
+            }
+        }
+
+        for (Measure measure : remaining) {
+            strict.remove(measure);
+            noImplicit.remove(measure);
+        }
+
+        return doProcess();
+    }
+
+    private static Map<AbstractChordInter, Rational> startTimes (Measure measure)
+    {
+        final Map<AbstractChordInter, Rational> times = new LinkedHashMap<>();
+
+        for (AbstractChordInter chord : voicedChords(measure)) {
+            times.put(chord, chord.getTimeOffset());
+        }
+
+        return times;
+    }
+
+    //-----------//
+    // keepsMost //
+    //-----------//
+    /**
+     * Tell whether, wherever chords at one abscissa had different times, most of them have kept
+     * theirs.
+     *
+     * @param measure the measure read again
+     * @param before  the time of each chord before
+     * @return false if more of them have moved than kept their time
+     */
+    private static boolean keepsMost (Measure measure,
+                                      Map<AbstractChordInter, Rational> before)
+    {
+        final int sameX = sameAbscissa(measure);
+        final List<AbstractChordInter> chords = voicedChords(measure);
+
+        for (int i = 0; i < chords.size(); i++) {
+            final int x = chords.get(i).getCenter().x;
+            final Set<Rational> times = new LinkedHashSet<>();
+            int kept = 0;
+            int moved = 0;
+
+            for (AbstractChordInter chord : chords.subList(i, chords.size())) {
+                if ((chord.getCenter().x - x) > sameX) {
+                    break;
+                }
+
+                final Rational time = before.get(chord);
+
+                if (time != null) {
+                    times.add(time);
+
+                    if (time.equals(chord.getTimeOffset())) {
+                        kept++;
+                    } else {
+                        moved++;
+                    }
+                }
+            }
+
+            if ((times.size() > 1) && (moved > kept)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Report the chords of a measure, measure rests apart, from left to right.
+     */
+    private static List<AbstractChordInter> voicedChords (Measure measure)
+    {
+        final List<AbstractChordInter> chords = new ArrayList<>();
+
+        for (Voice voice : measure.getVoices()) {
+            if (!voice.isMeasureRest()) {
+                chords.addAll(voice.getChords());
+            }
+        }
+
+        chords.sort(Comparator.comparingInt(chord -> chord.getCenter().x));
+
+        return chords;
+    }
+
+    private static int sameAbscissa (Measure measure)
+    {
+        return (int) Math.rint(
+                SAME_ABSCISSA * measure.getStack().getSystem().getSheet().getInterline());
+    }
+
+    private static void setRetry (Set<Measure> set,
+                                  Measure measure,
+                                  boolean on)
+    {
+        if (on) {
+            set.add(measure);
+        } else {
+            set.remove(measure);
+        }
+    }
+
+    //----------//
+    // disorder //
+    //----------//
+    /**
+     * Tell how the chords of a measure go against the page.
+     *
+     * @return 0 if they are in order, 1 if chords at one abscissa differ in time, 2 if a chord
+     *         further right than another starts before it
+     */
+    private static int disorder (Measure measure)
+    {
+        final int sameX = sameAbscissa(measure);
+        Rational latest = null;
+        int latestX = 0;
+        int disorder = 0;
+
+        for (AbstractChordInter chord : voicedChords(measure)) {
+            final Rational start = chord.getTimeOffset();
+
+            if (start != null) {
+                final int x = chord.getCenter().x;
+                final int order = (latest != null) ? start.compareTo(latest) : 0;
+
+                if ((order != 0) && ((x - latestX) <= sameX)) {
+                    disorder = 1;
+                } else if (order < 0) {
+                    return 2;
+                }
+
+                if (order >= 0) {
+                    latest = start;
+                    latestX = x;
+                }
+            }
+        }
+
+        return disorder;
     }
 
     //-------------//
