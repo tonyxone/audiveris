@@ -1491,17 +1491,41 @@ public class PartwiseBuilder
         return map;
     }
 
+    //--------------------//
+    // exportsSmallChords //
+    //--------------------//
+    /**
+     * Tell whether a measure holds small chords that would get exported, even without any
+     * standard chord, as in a measure made only of a cadenza.
+     *
+     * @param measure the measure to check
+     * @return true if so
+     */
+    public static boolean exportsSmallChords (Measure measure)
+    {
+        final boolean all = exportsOrphanGraces();
+
+        for (HeadChordInter chord : measure.getHeadChords()) {
+            if (all || ((chord instanceof SmallChordInter) && isDrawn(chord))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     //---------//
     // isDrawn //
     //---------//
     /**
-     * Tell whether a vector PDF draws every head of a chord where it was recognized.
+     * Tell whether a vector PDF draws some head of a chord where it was recognized: a false or
+     * misplaced head must not cost the real ones of its chord.
      */
     private static boolean isDrawn (AbstractChordInter chord)
     {
         final List<? extends Inter> notes = chord.getNotes();
 
-        return !notes.isEmpty() && notes.stream().allMatch(VectorChecker::isDrawn);
+        return notes.stream().anyMatch(VectorChecker::isDrawn);
     }
 
     //----------------//

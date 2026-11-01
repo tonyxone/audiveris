@@ -134,7 +134,7 @@ public class MeasureFixer
 
             // A measure made only of small notes (e.g. a cadenza) has no voice but is not empty,
             // provided these small notes get exported
-            if (PartwiseBuilder.exportsOrphanGraces() && !measure.getHeadChords().isEmpty()) {
+            if (PartwiseBuilder.exportsSmallChords(measure)) {
                 return false;
             }
         }
