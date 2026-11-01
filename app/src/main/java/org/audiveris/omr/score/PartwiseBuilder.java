@@ -46,6 +46,7 @@ import org.audiveris.omr.sheet.rhythm.MeasureStack;
 import org.audiveris.omr.sheet.rhythm.Slot;
 import org.audiveris.omr.sheet.rhythm.SlotVoice;
 import org.audiveris.omr.sheet.rhythm.Voice;
+import org.audiveris.omr.sheet.vector.VectorChecker;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.AbstractBeamInter;
 import org.audiveris.omr.sig.inter.AbstractChordInter;
@@ -1420,6 +1421,9 @@ public class PartwiseBuilder
      * Each of them is assigned to the next standard chord on the right (preferably in the same
      * staff), so that it can be exported as a grace note before this chord, rather than be lost.
      * Small chords with no standard chord on their right are mapped to the null key.
+     * <p>
+     * Unless {@link #exportsOrphanGraces} is set, only the small chords a vector PDF draws are
+     * exported: on a scan most of them are noise.
      *
      * @param measure the measure to process
      * @return the map: standard chord &rarr; preceding orphan small chords (in abscissa order)
@@ -1427,10 +1431,7 @@ public class PartwiseBuilder
     private static Map<AbstractChordInter, List<SmallChordInter>> getOrphanGraces (Measure measure)
     {
         final Map<AbstractChordInter, List<SmallChordInter>> map = new LinkedHashMap<>();
-
-        if (!exportsOrphanGraces()) {
-            return map;
-        }
+        final boolean all = exportsOrphanGraces();
         final Set<AbstractChordInter> linked = new LinkedHashSet<>();
         final List<AbstractChordInter> targets = new ArrayList<>();
 
@@ -1455,7 +1456,7 @@ public class PartwiseBuilder
 
         for (HeadChordInter chord : measure.getHeadChords()) {
             if ((chord instanceof SmallChordInter small) && (small.getVoice() == null)
-                    && !linked.contains(small)) {
+                    && !linked.contains(small) && (all || isDrawn(small))) {
                 orphans.add(small);
             }
         }
@@ -1488,6 +1489,45 @@ public class PartwiseBuilder
         }
 
         return map;
+    }
+
+    //---------//
+    // isDrawn //
+    //---------//
+    /**
+     * Tell whether a vector PDF draws every head of a chord where it was recognized.
+     */
+    private static boolean isDrawn (AbstractChordInter chord)
+    {
+        final List<? extends Inter> notes = chord.getNotes();
+
+        return !notes.isEmpty() && notes.stream().allMatch(VectorChecker::isDrawn);
+    }
+
+    //----------------//
+    // processOrphans //
+    //----------------//
+    /**
+     * Export small chords that belong to no standard chord as grace notes.
+     * <p>
+     * A run of them is a cadenza, which takes time of its own: left to steal from the next
+     * note, it would pass in a flash. Its first grace note tells how long it lasts.
+     *
+     * @param orphans the small chords, in abscissa order
+     */
+    private void processOrphans (List<SmallChordInter> orphans)
+    {
+        if (orphans.size() >= constants.minCadenzaChords.getValue()) {
+            final double quarters = orphans.size() * constants.cadenzaChordQuarters.getValue();
+            current.graceMakeTime = BigDecimal.valueOf(
+                    quarters * current.page.simpleDurationOf(Rational.QUARTER));
+        }
+
+        for (SmallChordInter small : orphans) {
+            processChord(small);
+        }
+
+        current.graceMakeTime = null;
     }
 
     //--------------//
@@ -2252,9 +2292,7 @@ public class PartwiseBuilder
                             final List<SmallChordInter> orphans = orphanGraces.get(chord);
 
                             if (orphans != null) {
-                                for (SmallChordInter small : orphans) {
-                                    processChord(small);
-                                }
+                                processOrphans(orphans);
                             }
 
                             // Grace chord(s) before this chord?
@@ -2297,9 +2335,7 @@ public class PartwiseBuilder
                     final List<SmallChordInter> trailing = orphanGraces.get(null);
 
                     if (trailing != null) {
-                        for (SmallChordInter small : trailing) {
-                            processChord(small);
-                        }
+                        processOrphans(trailing);
                     }
                 }
 
@@ -2311,9 +2347,7 @@ public class PartwiseBuilder
                 final List<SmallChordInter> trailing = orphanGraces.get(null);
 
                 if (trailing != null) {
-                    for (SmallChordInter small : trailing) {
-                        processChord(small);
-                    }
+                    processOrphans(trailing);
 
                     current.endVoice();
                 }
@@ -2482,10 +2516,15 @@ public class PartwiseBuilder
                 final HeadChordInter headChord = (HeadChordInter) chord;
 
                 if (!current.measure.isDummy()) {
-                    // Grace?
-                    if (isFirstInChord && note.getShape().isSmallHead()) {
+                    // Grace? (every note of a grace chord is marked, not just the first)
+                    if (note.getShape().isSmallHead()) {
                         Grace grace = factory.createGrace();
                         current.pmNote.setGrace(grace);
+
+                        if (current.graceMakeTime != null) {
+                            grace.setMakeTime(current.graceMakeTime);
+                            current.graceMakeTime = null;
+                        }
 
                         // Slash?
                         if (headChord.hasSlash()) {
@@ -3960,6 +3999,15 @@ public class PartwiseBuilder
     private static class Constants
             extends ConstantSet
     {
+        private final Constant.Integer minCadenzaChords = new Constant.Integer(
+                "chords",
+                4,
+                "Minimum number of orphan small chords in a row to be played as a cadenza");
+
+        private final Constant.Ratio cadenzaChordQuarters = new Constant.Ratio(
+                0.25,
+                "Duration of each chord of a cadenza, in quarters");
+
         private final Constant.Boolean exportOrphanGraces = new Constant.Boolean(
                 false,
                 "Should small chords linked to no standard chord (cadenza) be exported as graces?");
@@ -3990,6 +4038,9 @@ public class PartwiseBuilder
     /** Keep references of all current entities. */
     private static class Current
     {
+        // Duration to make for the next grace note, if any
+        BigDecimal graceMakeTime;
+
         // Score dependent
         Work pmWork;
 

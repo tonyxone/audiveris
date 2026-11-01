@@ -217,10 +217,11 @@ public class VectorSymbols
 
     private VectorSymbols (List<Symbol> all)
     {
-        // A head is small (cue or grace) when clearly shorter than the usual heads of the page
+        // A head is small (cue or grace) when clearly shorter than the usual heads of the page,
+        // measured high in the range since small heads can make most of a page (a cadenza)
         final double[] heights = all.stream().filter(s -> s.kind.category == Category.HEAD)
                 .mapToDouble(s -> s.bounds.getHeight()).sorted().toArray();
-        final double usual = (heights.length > 0) ? heights[heights.length / 2] : 0;
+        final double usual = (heights.length > 0) ? heights[(heights.length * 9) / 10] : 0;
 
         for (Symbol symbol : all) {
             final boolean small = (symbol.kind.category == Category.HEAD)
