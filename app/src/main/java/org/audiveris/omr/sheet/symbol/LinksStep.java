@@ -29,6 +29,7 @@ import org.audiveris.omr.sheet.vector.VectorChecker;
 import org.audiveris.omr.sheet.rhythm.MeasureFiller;
 import org.audiveris.omr.sig.BeamHeadCleaner;
 import org.audiveris.omr.sig.SigReducer;
+import org.audiveris.omr.sig.inter.OctaveShiftInter;
 import org.audiveris.omr.sig.inter.HeadChordInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.LyricItemInter;
@@ -132,6 +133,9 @@ public class LinksStep
         // Fill each measure with all detected clef(s) and key if any
         // Because key change detection requires access to effective clef and key
         new MeasureFiller(system).process();
+
+        // Octave signs whose value was read as a word
+        OctaveShiftInter.fromWords(system);
 
         watch.start("SymbolsLinker");
         new SymbolsLinker(system).process();
