@@ -23,6 +23,7 @@ package org.audiveris.omr.sheet.note;
 
 import org.audiveris.omr.constant.Constant;
 import org.audiveris.omr.constant.ConstantSet;
+import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.math.GeoUtil;
 import org.audiveris.omr.sheet.Part;
 import org.audiveris.omr.sheet.ProcessingSwitch;
@@ -31,6 +32,7 @@ import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.rhythm.Measure;
+import org.audiveris.omr.sheet.vector.VectorChecker;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.AbstractBeamInter;
 import org.audiveris.omr.sig.inter.AbstractChordInter;
@@ -52,6 +54,7 @@ import org.audiveris.omr.sig.relation.HeadHeadRelation;
 import org.audiveris.omr.sig.relation.HeadStemRelation;
 import org.audiveris.omr.sig.relation.NoExclusion;
 import org.audiveris.omr.sig.relation.Relation;
+import org.audiveris.omr.sig.relation.StemAlignmentRelation;
 import org.audiveris.omr.sig.relation.StemPortion;
 import org.audiveris.omr.sig.relation.Support;
 import org.audiveris.omr.util.HorizontalSide;
@@ -153,6 +156,9 @@ public class ChordsBuilder
                 detectWholeVerticals(wholeHeads);
             }
         }
+
+        // Half notes sharing their stem with a beam group
+        splitVoidBeamedChords();
 
         // Dispatch head chords by containing measure
         dispatchChords();
@@ -393,6 +399,83 @@ public class ChordsBuilder
                     }
                 }
             }
+        }
+    }
+
+    //-----------------------//
+    // splitVoidBeamedChords //
+    //-----------------------//
+    /**
+     * Split every chord of void heads whose stem carries beams, when the PDF confirms
+     * the heads are void.
+     * <p>
+     * Such heads are those of a half note sharing its stem with a beam group, the group
+     * counting them as its first note. The beam side keeps the chord, its stem and beams. The
+     * half side gets a mirror chord, on the stem portion between the heads and the beams.
+     * <p>
+     * Without the PDF, void heads on a beamed stem are left as they are: most are misread
+     * black heads.
+     */
+    private void splitVoidBeamedChords ()
+    {
+        for (Inter inter : sig.inters(HeadChordInter.class)) {
+            final HeadChordInter chord = (HeadChordInter) inter;
+
+            if ((chord instanceof SmallChordInter) || chord.getBeams().isEmpty()) {
+                continue;
+            }
+
+            final List<Inter> notes = chord.getMembers();
+
+            if (notes.isEmpty() || !notes.stream().allMatch(
+                    note -> (note.getShape() == Shape.NOTEHEAD_VOID) && (note.getMirror() == null)
+                            && VectorChecker.isDrawn(note))) {
+                continue;
+            }
+
+            final StemInter stem = chord.getStem();
+            final List<AbstractBeamInter> beams = chord.getBeams();
+            final AbstractBeamInter headBeam = beams.get(beams.size() - 1);
+            final BeamStemRelation bs = (BeamStemRelation) sig.getRelation(
+                    headBeam,
+                    stem,
+                    BeamStemRelation.class);
+
+            if ((bs == null) || (stem.getGlyph() == null)) {
+                continue;
+            }
+
+            // From the head end of the stem to the beam, within the stem pixels
+            final Rectangle stemBox = stem.getGlyph().getBounds();
+            final int yStart = (chord.getStemDir() > 0) ? stemBox.y : (stemBox.y + stemBox.height
+                    - 1);
+            final int yStop = Math.max(
+                    stemBox.y,
+                    Math.min(
+                            stemBox.y + stemBox.height - 1,
+                            (int) Math.rint(bs.getExtensionPoint().getY())));
+            final StemInter halfStem = stem.extractSubStem(yStart, yStop);
+            sig.addEdge(halfStem, stem, new StemAlignmentRelation());
+
+            final HeadChordInter halfChord = chord.duplicate(false);
+            halfChord.setStem(halfStem);
+
+            // Half heads hang on the half stem, and each head overlaps the stem of the other side
+            for (Inter note : halfChord.getMembers()) {
+                for (Relation hs : sig.getRelations(note.getMirror(), HeadStemRelation.class)) {
+                    sig.addEdge(note, halfStem, hs.duplicate());
+                }
+
+                sig.addEdge(note, stem, new NoExclusion());
+                sig.addEdge(note.getMirror(), halfStem, new NoExclusion());
+                chord.getStaff().addNote((HeadInter) note);
+            }
+
+            for (AbstractBeamInter beam : beams) {
+                sig.addEdge(beam, halfStem, new NoExclusion());
+            }
+
+            logger.debug("Half chord {} split from beamed {}", halfChord, chord);
         }
     }
 
