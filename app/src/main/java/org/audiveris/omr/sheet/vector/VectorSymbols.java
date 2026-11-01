@@ -44,6 +44,8 @@ import java.awt.geom.AffineTransform;
 import java.awt.geom.GeneralPath;
 import java.awt.geom.Rectangle2D;
 import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetEncoder;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -51,12 +53,17 @@ import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.WeakHashMap;
 
 /**
  * Class <code>VectorSymbols</code> gathers the music symbols that a vector PDF page draws with
- * a SMuFL music font (Bravura, Leland, MuseScore's own font...), with their precise bounds in
- * sheet image pixels.
+ * a music font, with their precise bounds in sheet image pixels.
+ * <p>
+ * Three font layouts are read: SMuFL (Bravura, Leland, MuseScore's own font...), the font of
+ * MuseScore 2 (also named MScore, but with code points of its own) and the Sonata layout
+ * (Petrucci, Opus, Maestro...), which places symbols on the characters of the Mac Roman
+ * encoding.
  * <p>
  * A PDF exported from a notation program draws note heads, clefs, accidentals, dots and rests as
  * characters of a music font, and the code point of each character tells what the symbol is,
@@ -80,6 +87,24 @@ public class VectorSymbols
     /** The SMuFL code points of the symbols we use. */
     private static final Map<Character, Kind> SMUFL = new HashMap<>();
 
+    /** The code points of the symbols we use, in the font of MuseScore 2. */
+    private static final Map<Character, Kind> OLD_MSCORE = new HashMap<>();
+
+    /** The Mac Roman bytes of the symbols we use, in the Sonata layout. */
+    private static final Map<Integer, Kind> SONATA = new HashMap<>();
+
+    /** The music fonts with the Sonata layout. */
+    private static final Set<String> SONATA_FONTS = Set.of(
+            "Engraver",
+            "Maestro",
+            "Opus",
+            "OpusStd",
+            "Petrucci",
+            "Sonata");
+
+    /** Encoder to the Mac Roman bytes of a Sonata layout font. */
+    private static final Charset MAC_ROMAN = Charset.forName("x-MacRoman");
+
     static {
         smufl(Kind.HEAD_BREVE, 0xE0A0, 0xE0A1);
         smufl(Kind.HEAD_WHOLE, 0xE0A2);
@@ -102,6 +127,40 @@ public class VectorSymbols
         smufl(Kind.REST_16TH, 0xE4E7);
         smufl(Kind.REST_32ND, 0xE4E8);
         smufl(Kind.REST_64TH, 0xE4E9);
+
+        // The augmentation dot of MuseScore 2 is a glyph of its own, unlike its staccato
+        oldMScore(Kind.HEAD_WHOLE, 0xE12B);
+        oldMScore(Kind.HEAD_VOID, 0xE12C);
+        oldMScore(Kind.HEAD_BLACK, 0xE12D);
+        oldMScore(Kind.CLEF_G, 0xE19E);
+        oldMScore(Kind.CLEF_F, 0xE19C);
+        oldMScore(Kind.SHARP, 0xE10E);
+        oldMScore(Kind.NATURAL, 0xE113);
+        oldMScore(Kind.FLAT, 0xE114);
+        oldMScore(Kind.DOUBLE_FLAT, 0xE11A);
+        oldMScore(Kind.AUGMENTATION_DOT, 0xE127);
+        oldMScore(Kind.REST_WHOLE, 0xE100);
+        oldMScore(Kind.REST_HALF, 0xE101);
+        oldMScore(Kind.REST_QUARTER, 0xE107);
+        oldMScore(Kind.REST_8TH, 0xE109);
+        oldMScore(Kind.REST_16TH, 0xE10A);
+        oldMScore(Kind.REST_32ND, 0xE10B);
+
+        // The Sonata layout draws the augmentation dot and the staccato with one glyph: '.'
+        SONATA.put(0xCF, Kind.HEAD_BLACK);
+        SONATA.put(0xFA, Kind.HEAD_VOID);
+        SONATA.put((int) 'w', Kind.HEAD_WHOLE);
+        SONATA.put((int) '&', Kind.CLEF_G);
+        SONATA.put((int) '?', Kind.CLEF_F);
+        SONATA.put((int) 'B', Kind.CLEF_C);
+        SONATA.put((int) 'b', Kind.FLAT);
+        SONATA.put((int) 'n', Kind.NATURAL);
+        SONATA.put((int) '#', Kind.SHARP);
+        SONATA.put(0xB7, Kind.REST_WHOLE);
+        SONATA.put(0xEE, Kind.REST_HALF);
+        SONATA.put(0xCE, Kind.REST_QUARTER);
+        SONATA.put(0xE4, Kind.REST_8TH);
+        SONATA.put(0xC5, Kind.REST_16TH);
     }
 
     //~ Enumerations -------------------------------------------------------------------------------
@@ -267,6 +326,51 @@ public class VectorSymbols
         }
     }
 
+    //--------//
+    // kindOf //
+    //--------//
+    /**
+     * Report the kind of symbol a character of a font draws.
+     *
+     * @param font the font
+     * @param c    the character
+     * @return the kind of symbol, or null if not one we use
+     */
+    private static Kind kindOf (PDFont font,
+                                char c)
+    {
+        final Kind kind = SMUFL.get(c);
+
+        if (kind != null) {
+            return kind;
+        }
+
+        // Font name, without the prefix of a subset ("ABCDEF+", "CIDFont+")
+        final String fontName = (font.getName() == null) ? "" : font.getName().replaceFirst(
+                "^[^+]*\\+",
+                "");
+
+        if (fontName.equals("MScore")) {
+            return OLD_MSCORE.get(c);
+        }
+
+        if ((c >= 0xF000) && (c <= 0xF0FF) && (SONATA_FONTS.contains(fontName) || fontName
+                .matches("F\\d+"))) {
+            // A symbol font, which maps its bytes to private code points, as Finale does
+            return SONATA.get(c - 0xF000);
+        }
+
+        if (SONATA_FONTS.contains(fontName)) {
+            final CharsetEncoder encoder = MAC_ROMAN.newEncoder();
+
+            if (encoder.canEncode(c)) {
+                return SONATA.get(String.valueOf(c).getBytes(MAC_ROMAN)[0] & 0xFF);
+            }
+        }
+
+        return null;
+    }
+
     //----//
     // of //
     //----//
@@ -283,6 +387,17 @@ public class VectorSymbols
         }
 
         return cache.computeIfAbsent(sheet.getStub(), stub -> extract(sheet));
+    }
+
+    //-----------//
+    // oldMScore //
+    //-----------//
+    private static void oldMScore (Kind kind,
+                                   int... codes)
+    {
+        for (int code : codes) {
+            OLD_MSCORE.put((char) code, kind);
+        }
     }
 
     //-------//
@@ -370,7 +485,7 @@ public class VectorSymbols
                 return;
             }
 
-            final Kind kind = SMUFL.get(unicode.charAt(0));
+            final Kind kind = kindOf(font, unicode.charAt(0));
 
             if (kind == null) {
                 return;
