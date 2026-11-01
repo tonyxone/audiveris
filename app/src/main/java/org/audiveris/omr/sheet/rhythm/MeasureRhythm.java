@@ -21,6 +21,7 @@
 // </editor-fold>
 package org.audiveris.omr.sheet.rhythm;
 
+import org.audiveris.omr.constant.Constant;
 import org.audiveris.omr.constant.ConstantSet;
 import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.math.Rational;
@@ -852,6 +853,8 @@ public class MeasureRhythm
         final MeasureStack stack = measure.getStack();
         final Rational expected = stack.getExpectedDuration();
 
+        timeWholeVoices(untimed, expected);
+
         for (AbstractChordInter chord : untimed) {
             final Rational dur = chord.getDuration();
 
@@ -874,6 +877,73 @@ public class MeasureRhythm
                     <= 0))) {
                 logger.debug("{} {} timed at {}", measure, chord, time);
                 chord.setAndPushTime(time);
+            }
+        }
+    }
+
+    //-----------------//
+    // timeWholeVoices //
+    //-----------------//
+    /**
+     * Time a voice none of whose chords got a time, when its durations lead to the end of the
+     * measure: from where it then has to start, provided its first chord stands about there.
+     * <p>
+     * Its first chord may stand in no slot with a time: a rest beside the first chord of the other
+     * hand, or a first chord after a misread one. All the chords of the voice would then be lost.
+     */
+    private void timeWholeVoices (List<AbstractChordInter> untimed,
+                                  Rational expected)
+    {
+        if (expected == null) {
+            return;
+        }
+
+        final MeasureStack stack = measure.getStack();
+        final Set<Voice> voices = new LinkedHashSet<>();
+
+        for (AbstractChordInter chord : untimed) {
+            voices.add(chord.getVoice());
+        }
+
+        for (Voice voice : voices) {
+            final List<AbstractChordInter> chords = voice.getChords();
+            Rational total = ZERO;
+
+            for (AbstractChordInter chord : chords) {
+                final Rational dur = chord.getDuration();
+
+                if ((chord.getTimeOffset() != null) || (dur == null) || (dur.compareTo(ZERO) <= 0)) {
+                    total = null;
+
+                    break;
+                }
+
+                total = total.plus(dur);
+            }
+
+            if ((total == null) || chords.isEmpty() || (total.compareTo(expected) > 0)) {
+                continue;
+            }
+
+            final AbstractChordInter first = chords.get(0);
+            final Staff staff = first.getTopStaff();
+            final double xLeft = stack.getXOffset(
+                    measure.getSidePoint(HorizontalSide.LEFT, staff),
+                    staff);
+            final double xRight = stack.getXOffset(
+                    measure.getSidePoint(HorizontalSide.RIGHT, staff),
+                    staff);
+            final Rational start = expected.minus(total);
+            final double place = (stack.getXOffset(first.getCenter()) - xLeft) / (xRight - xLeft);
+            final double where = start.doubleValue() / expected.doubleValue();
+
+            // A measure may start with a header, hence more leeway for a voice starting with it
+            final Constant.Ratio maxShift = start.equals(ZERO) ? constants.maxFirstVoiceShift
+                    : constants.maxWholeVoiceShift;
+
+            if (Math.abs(place - where) <= maxShift.getValue()) {
+                logger.debug("{} {} timed at {} from the end", measure, voice, start);
+                first.setAndPushTime(start);
             }
         }
     }
@@ -1051,6 +1121,14 @@ public class MeasureRhythm
     private static class Constants
             extends ConstantSet
     {
+        private final Constant.Ratio maxFirstVoiceShift = new Constant.Ratio(
+                0.4,
+                "Maximum shift, as ratio of measure width, of the first chord of a voice starting the measure");
+
+        private final Constant.Ratio maxWholeVoiceShift = new Constant.Ratio(
+                0.1,
+                "Maximum shift, as ratio of measure width, of the first chord of a voice timed from the end");
+
         private final Scale.Fraction maxColumnDx = new Scale.Fraction(
                 1.0,
                 "Maximum horizontal delta for an untimed chord to take the time of a timed one");
