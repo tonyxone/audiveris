@@ -43,6 +43,7 @@ import org.audiveris.omr.sig.relation.Relation;
 import org.audiveris.omr.sig.relation.SlurHeadRelation;
 import org.audiveris.omr.util.Entities;
 import org.audiveris.omr.util.HorizontalSide;
+import org.audiveris.omr.util.Jaxb;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,6 +59,7 @@ import java.util.List;
 import java.util.Set;
 
 import javax.xml.bind.annotation.XmlAttribute;
+import javax.xml.bind.annotation.adapters.XmlJavaTypeAdapter;
 
 /**
  * Class <code>AbstractChordInter</code> represents an ensemble of notes (rests, heads)
@@ -93,6 +95,11 @@ public abstract class AbstractChordInter
     /** Preferred voice ID, if any. */
     @XmlAttribute(name = "preferred-voice-id")
     private Integer preferredVoiceId;
+
+    /** Whether this chord alternates with another in a two-note tremolo, set by rhythm. */
+    @XmlAttribute(name = "tremolo-half")
+    @XmlJavaTypeAdapter(type = boolean.class, value = Jaxb.BooleanPositiveAdapter.class)
+    private boolean tremoloHalf;
 
     // Transient data
     //---------------
@@ -510,13 +517,43 @@ public abstract class AbstractChordInter
             Rational sansTuplet = getDurationSansTuplet();
 
             DurationFactor tupletFactor = getTupletFactor();
+            Rational duration = (tupletFactor == null) ? sansTuplet
+                    : sansTuplet.times(tupletFactor);
 
-            if (tupletFactor == null) {
-                return sansTuplet;
-            } else {
-                return sansTuplet.times(tupletFactor);
+            // Each chord of a two-note tremolo plays half the written duration
+            if (tremoloHalf && (duration != null)) {
+                duration = duration.divides(2);
             }
+
+            return duration;
         }
+    }
+
+    //---------------//
+    // isTremoloHalf //
+    //---------------//
+    /**
+     * Tell whether this chord alternates with another in a two-note tremolo, and so plays
+     * half its written duration.
+     *
+     * @return true if so
+     */
+    public boolean isTremoloHalf ()
+    {
+        return tremoloHalf;
+    }
+
+    //----------------//
+    // setTremoloHalf //
+    //----------------//
+    /**
+     * Set whether this chord alternates with another in a two-note tremolo.
+     *
+     * @param tremoloHalf true if so
+     */
+    public void setTremoloHalf (boolean tremoloHalf)
+    {
+        this.tremoloHalf = tremoloHalf;
     }
 
     //----------------------------//

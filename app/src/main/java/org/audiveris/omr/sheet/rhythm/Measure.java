@@ -1301,6 +1301,32 @@ public class Measure
         return Collections.unmodifiableSet(restChords);
     }
 
+    //----------------//
+    // hideRestChords //
+    //----------------//
+    /**
+     * Keep the provided rest chords out of the rhythm of this measure, for a trial.
+     *
+     * @param chords the rest chords to hide
+     */
+    public void hideRestChords (Collection<RestChordInter> chords)
+    {
+        restChords.removeAll(chords);
+    }
+
+    //----------------//
+    // showRestChords //
+    //----------------//
+    /**
+     * Put back the rest chords hidden by {@link #hideRestChords}.
+     *
+     * @param chords the rest chords to show
+     */
+    public void showRestChords (Collection<RestChordInter> chords)
+    {
+        restChords.addAll(chords);
+    }
+
     //----------//
     // getRight //
     //----------//
