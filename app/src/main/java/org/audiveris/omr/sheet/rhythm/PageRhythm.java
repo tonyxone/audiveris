@@ -92,6 +92,9 @@ public class PageRhythm
     /** The page being processed. */
     private final Page page;
 
+    /** The time inferred at the end of the previous page, if this page goes on with it. */
+    private TimeRational inheritedTime;
+
     /** Sequence of time-sig ranges found in page. */
     private final List<Range> ranges = new ArrayList<>();
 
@@ -202,6 +205,7 @@ public class PageRhythm
                     if (lastTR != null) {
                         range.timeRational = lastTR.duplicate();
                         range.duration = lastTR.getValue();
+                        inheritedTime = prevPageRef.isLastTimeInferred() ? lastTR.duplicate() : null;
                         logger.info(
                                 "{} Time value reused from sheet#{}",
                                 page,
@@ -281,10 +285,15 @@ public class PageRhythm
     private void inferTimes ()
     {
         final List<MeasureStack> stacks = new ArrayList<>();
+        TimeRational inherited = inheritedTime; // Up to the first time signature of the page
 
         for (SystemInfo system : page.getSystems()) {
             for (MeasureStack stack : system.getStacks()) {
-                stack.setInferredTime(null);
+                if (stack.getTimeSignature() != null) {
+                    inherited = null;
+                }
+
+                stack.setInferredTime(inherited);
 
                 if (!stack.isCautionary() && !stack.isMultiRest() && !stack.isFirstHalf()
                         && !stack.isImplicit()) {
@@ -339,6 +348,17 @@ public class PageRhythm
             } else {
                 i++;
             }
+        }
+
+        // The next page goes on with the time its last bars were read with
+        if (n > 0) {
+            final TimeRational last = stacks.get(n - 1).getInferredTime();
+
+            if (last != null) {
+                page.setLastTimeRational(last.duplicate());
+            }
+
+            page.getRef().setLastTimeInferred(last != null);
         }
     }
 

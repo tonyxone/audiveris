@@ -30,6 +30,7 @@ import org.audiveris.omr.sig.inter.AbstractTimeInter;
 import org.audiveris.omr.sig.inter.BeamGroupInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.Inters;
+import org.audiveris.omr.sig.inter.RestChordInter;
 import org.audiveris.omr.sig.inter.TupletInter;
 import org.audiveris.omr.sig.inter.WordInter;
 
@@ -334,6 +335,10 @@ public class StackRhythm
     {
         stack.setExpectedDuration(expectedDuration);
 
+        for (Measure measure : stack.getMeasures()) {
+            TwoNoteTremolos.detect(measure, false, new ArrayList<>());
+        }
+
         try {
             boolean ok = doProcess();
 
@@ -353,13 +358,7 @@ public class StackRhythm
                 }
             }
 
-            if (retryStrict()) {
-                ok = doProcess();
-
-                if (dropUnfitStrict()) {
-                    ok = doProcess();
-                }
-            }
+            ok = retryOffTime(ok);
 
             if (!ok) {
                 logger.info("{}{} no correct rhythm", stack.getSystem().getLogPrefix(), stack);
@@ -444,6 +443,83 @@ public class StackRhythm
         return added;
     }
 
+    //--------------//
+    // retryOffTime //
+    //--------------//
+    /**
+     * Read again the measures still off their time: with strict voices, then with two-note
+     * tremolos, then with both. Each measure is kept that way only if it then fits.
+     *
+     * @param ok the current status
+     * @return the new status
+     */
+    private boolean retryOffTime (boolean ok)
+    {
+        final Rational expected = stack.getExpectedDuration();
+
+        if ((expected == null) || stack.isImplicit()) {
+            return ok;
+        }
+
+        boolean result = ok;
+
+        if (retryStrict(stack.getMeasures())) {
+            result = doProcess();
+
+            if (dropUnfitStrict()) {
+                result = doProcess();
+            }
+        }
+
+        // The rests read on the strokes are out of the rhythm during the trial, for good if it works
+        final Map<Measure, List<RestChordInter>> tremolos = new LinkedHashMap<>();
+
+        for (Measure measure : stack.getMeasures()) {
+            final List<RestChordInter> strokes = new ArrayList<>();
+
+            if (!fits(measure, expected) && TwoNoteTremolos.detect(measure, true, strokes)) {
+                measure.hideRestChords(strokes);
+                tremolos.put(measure, strokes);
+            }
+        }
+
+        if (tremolos.isEmpty()) {
+            return result;
+        }
+
+        result = doProcess();
+
+        if (retryStrict(tremolos.keySet())) {
+            result = doProcess();
+
+            if (dropUnfitStrict()) {
+                result = doProcess();
+            }
+        }
+
+        boolean dropped = false;
+
+        for (Map.Entry<Measure, List<RestChordInter>> entry : tremolos.entrySet()) {
+            final Measure measure = entry.getKey();
+            final List<RestChordInter> strokes = entry.getValue();
+            final boolean good = fits(measure, expected) && isSequential(measure);
+            measure.showRestChords(strokes);
+
+            if (good) {
+                logger.info("{} off its time, read with two-note tremolos", measure);
+
+                for (RestChordInter rest : strokes) {
+                    rest.remove();
+                }
+            } else {
+                TwoNoteTremolos.detect(measure, false, new ArrayList<>());
+                dropped = true;
+            }
+        }
+
+        return dropped ? doProcess() : result;
+    }
+
     //-------------//
     // retryStrict //
     //-------------//
@@ -459,7 +535,7 @@ public class StackRhythm
      *
      * @return true if some measure is to be read again
      */
-    private boolean retryStrict ()
+    private boolean retryStrict (Collection<Measure> measures)
     {
         final Rational expected = stack.getExpectedDuration();
 
@@ -472,9 +548,12 @@ public class StackRhythm
                 3,
                 current.den) : null;
 
-        for (Measure measure : stack.getMeasures()) {
+        boolean added = false;
+
+        for (Measure measure : measures) {
             if (!fits(measure, expected) && !measure.getStandardChords().isEmpty()) {
                 strict.add(measure);
+                added = true;
 
                 if (isLong(measure, expected) && !forced.containsKey(measure)) {
                     final List<List<AbstractChordInter>> groups = new ArrayList<>();
@@ -496,7 +575,7 @@ public class StackRhythm
             }
         }
 
-        return !strict.isEmpty();
+        return added;
     }
 
     //-----------------//

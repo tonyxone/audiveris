@@ -119,6 +119,9 @@ public class PageRef
     @Navigable(false)
     private SheetStub stub;
 
+    /** Whether the last time rational was inferred from the bars. Not persistent. */
+    private boolean lastTimeInferred;
+
     //~ Constructors -------------------------------------------------------------------------------
 
     /**
@@ -372,6 +375,32 @@ public class PageRef
     public void setLastTimeRational (TimeRational lastTimeRational)
     {
         this.lastTimeRational = lastTimeRational;
+    }
+
+    //-------------------//
+    // isLastTimeInferred //
+    //-------------------//
+    /**
+     * Report whether the last time rational of this page was inferred from its bars.
+     *
+     * @return true if so
+     */
+    public boolean isLastTimeInferred ()
+    {
+        return lastTimeInferred;
+    }
+
+    //---------------------//
+    // setLastTimeInferred //
+    //---------------------//
+    /**
+     * Set whether the last time rational of this page was inferred from its bars.
+     *
+     * @param lastTimeInferred true if so
+     */
+    public void setLastTimeInferred (boolean lastTimeInferred)
+    {
+        this.lastTimeInferred = lastTimeInferred;
     }
 
     //------------//
