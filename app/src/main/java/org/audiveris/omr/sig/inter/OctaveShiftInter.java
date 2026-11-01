@@ -903,17 +903,31 @@ public class OctaveShiftInter
 
         final Sheet sheet = staff.getSystem().getSheet();
 
+        // A sign between two systems is read in each: it belongs to the closer staff
+        final Staff nearest = sheet.getStaffManager().getClosestStaff(center);
+
+        if ((nearest != null) && (nearest != staff)) {
+            logger.debug("OctaveShift value {} is closer to {}, discarded", glyph, nearest);
+            return null;
+        }
+
         if (isWithinText(glyph, sheet)) {
             logger.debug("OctaveShift value {} is a character of text, discarded", glyph);
             return null;
         }
 
-        //TODO: Can we check for presence of a long dashed line???
-        //
         final OctaveShiftInter os = new OctaveShiftInter(glyph, shape, null, grade);
         final Scale scale = sheet.getScale();
         final int lineLg = scale.toPixels(DEFAULT_LINE_LENGTH);
-        os.line = new Line2D.Double(center, new Point(center.x + lineLg, center.y));
+
+        // The line runs over all the notes to shift, often across the whole staff
+        final Integer end = lineEnd(
+                sheet.getPicture().getSource(Picture.SourceKey.BINARY),
+                glyph.getBounds(),
+                scale.getInterline(),
+                staff.getAbscissa(HorizontalSide.RIGHT));
+        final int x2 = (end != null) ? Math.max(end, center.x + lineLg) : center.x + lineLg;
+        os.line = new Line2D.Double(center, new Point(x2, center.y));
         os.setStaff(staff);
 
         return os;
@@ -1076,6 +1090,115 @@ public class OctaveShiftInter
         }
 
         return best;
+    }
+
+    //---------//
+    // lineEnd //
+    //---------//
+    /**
+     * Report the abscissa where the line of an octave sign ends: its dashes, dots or solid
+     * run, on the row where a thin horizontal line follows the value, with gaps no wider
+     * than between dashes or across a note that crosses it, up to its end hook if any.
+     *
+     * @param buf       the binary image
+     * @param box       the value glyph bounds
+     * @param interline the staff interline
+     * @param xMax      the right end of the staff
+     * @return the abscissa of the last line pixel, or null if no line follows the value
+     */
+    private static Integer lineEnd (ByteProcessor buf,
+                                    Rectangle box,
+                                    int interline,
+                                    int xMax)
+    {
+        if ((buf == null) || (box.width <= 0) || (box.height <= 0)) {
+            return null;
+        }
+
+        final int width = Math.min(buf.getWidth(), xMax + interline);
+        final int height = buf.getHeight();
+        final int clearance = Math.max(2, interline / 4);
+        final int maxGap = 2 * interline;
+        final int x1 = box.x + box.width;
+        Integer best = null;
+
+        for (int r = box.y; r <= box.y + box.height; r++) {
+            if (r - clearance - 1 < 0 || r + clearance + 1 >= height) {
+                continue;
+            }
+
+            int last = -1;
+            int gap = 0;
+
+            for (int c = x1; c < width && gap <= maxGap; c++) {
+                final boolean core = buf.get(c, r - 1) == 0 || buf.get(c, r) == 0
+                        || buf.get(c, r + 1) == 0;
+                final boolean clear = buf.get(c, r - clearance - 1) != 0
+                        && buf.get(c, r - clearance) != 0
+                        && buf.get(c, r + clearance) != 0
+                        && buf.get(c, r + clearance + 1) != 0;
+
+                if (core && clear) {
+                    last = c;
+                    gap = 0;
+                } else if (core && isHook(buf, c, r, clearance, interline)) {
+                    last = c;
+
+                    break;
+                } else if (last >= 0 || c - x1 > maxGap) {
+                    gap++;
+                }
+            }
+
+            if ((last >= 0) && ((best == null) || (last > best))) {
+                best = last;
+            }
+        }
+
+        return best;
+    }
+
+    //--------//
+    // isHook //
+    //--------//
+    /**
+     * Tell whether a column holds the end hook of a line: ink from the line row down or up
+     * for most of an interline, and none on the other side, unlike a stem crossing it.
+     */
+    private static boolean isHook (ByteProcessor buf,
+                                   int c,
+                                   int r,
+                                   int clearance,
+                                   int interline)
+    {
+        final int lg = (2 * interline) / 3;
+
+        for (int dir : new int[]{1, -1}) {
+            final int far = r + dir * lg;
+            final int back = r - dir * (clearance + 1);
+
+            if (far < 0 || far >= buf.getHeight() || back < 0 || back >= buf.getHeight()) {
+                continue;
+            }
+
+            if (buf.get(c, back) == 0) {
+                continue;
+            }
+
+            int ink = 0;
+
+            for (int y = r; y != far; y += dir) {
+                if (buf.get(c, y) == 0) {
+                    ink++;
+                }
+            }
+
+            if (ink >= 0.9 * lg) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     //~ Inner Classes ------------------------------------------------------------------------------
