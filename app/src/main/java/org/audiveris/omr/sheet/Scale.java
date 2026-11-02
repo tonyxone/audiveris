@@ -722,6 +722,19 @@ public class Scale
         this.headSeedScale = headSeedScale;
     }
 
+    //---------------------//
+    // setExtrapolatedBeam //
+    //---------------------//
+    /**
+     * Assign a beam thickness that remains a guess.
+     *
+     * @param thickness the beam thickness
+     */
+    public void setExtrapolatedBeam (int thickness)
+    {
+        beamScale = new BeamScale(thickness, true);
+    }
+
     //--------------//
     // setItemValue //
     //--------------//
