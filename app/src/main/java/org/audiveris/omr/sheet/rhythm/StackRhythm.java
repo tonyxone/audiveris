@@ -1189,6 +1189,10 @@ public class StackRhythm
     /**
      * The beam groups of a measure that could be unmarked tuplets: 3 or 6 chords, all in
      * the measure, of equal duration and without a tuplet sign.
+     * <p>
+     * In a beam group of 4, three chords of equal duration and a fourth of twice it, first or
+     * last, the three could make a triplet that, with the fourth, fills a beat: three sixteenths
+     * and an eighth, as in Debussy's second Arabesque.
      */
     private static List<List<AbstractChordInter>> plainGroups (Measure measure)
     {
@@ -1196,7 +1200,16 @@ public class StackRhythm
         final List<List<AbstractChordInter>> groups = new ArrayList<>();
 
         for (BeamGroupInter bg : measure.getBeamGroups()) {
-            final List<AbstractChordInter> group = new ArrayList<>(bg.getChords());
+            List<AbstractChordInter> group = new ArrayList<>(bg.getChords());
+
+            if (group.size() == 4) {
+                Collections.sort(group, Inters.byCenterAbscissa);
+                group = tripletOfFour(group);
+
+                if (group == null) {
+                    continue;
+                }
+            }
 
             if ((group.size() != 3) && (group.size() != 6)) {
                 continue;
@@ -1225,6 +1238,37 @@ public class StackRhythm
         }
 
         return groups;
+    }
+
+    //---------------//
+    // tripletOfFour //
+    //---------------//
+    /**
+     * In 4 chords ordered by abscissa, the 3 of equal duration next to a fourth of twice it.
+     *
+     * @return the 3 chords, or null
+     */
+    private static List<AbstractChordInter> tripletOfFour (List<AbstractChordInter> four)
+    {
+        final Rational[] d = new Rational[4];
+
+        for (int i = 0; i < 4; i++) {
+            d[i] = four.get(i).getDurationSansTuplet();
+
+            if (d[i] == null) {
+                return null;
+            }
+        }
+
+        if (d[0].equals(d[1]) && d[1].equals(d[2]) && d[3].equals(d[0].times(2))) {
+            return new ArrayList<>(four.subList(0, 3));
+        }
+
+        if (d[1].equals(d[2]) && d[2].equals(d[3]) && d[0].equals(d[1].times(2))) {
+            return new ArrayList<>(four.subList(1, 4));
+        }
+
+        return null;
     }
 
     //-----------------//
