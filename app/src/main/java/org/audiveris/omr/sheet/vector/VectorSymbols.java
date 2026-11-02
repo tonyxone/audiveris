@@ -32,6 +32,7 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDFont;
+import org.apache.pdfbox.pdmodel.font.PDSimpleFont;
 import org.apache.pdfbox.pdmodel.font.PDVectorFont;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.util.Matrix;
@@ -60,10 +61,10 @@ import java.util.WeakHashMap;
  * Class <code>VectorSymbols</code> gathers the music symbols that a vector PDF page draws with
  * a music font, with their precise bounds in sheet image pixels.
  * <p>
- * Three font layouts are read: SMuFL (Bravura, Leland, MuseScore's own font...), the font of
- * MuseScore 2 (also named MScore, but with code points of its own) and the Sonata layout
+ * Four font layouts are read: SMuFL (Bravura, Leland, MuseScore's own font...), the font of
+ * MuseScore 2 (also named MScore, but with code points of its own), the Sonata layout
  * (Petrucci, Opus, Maestro...), which places symbols on the characters of the Mac Roman
- * encoding.
+ * encoding, and the Emmentaler font of LilyPond, whose glyphs are known by their names.
  * <p>
  * A PDF exported from a notation program draws note heads, clefs, accidentals, dots and rests as
  * characters of a music font, and the code point of each character tells what the symbol is,
@@ -93,6 +94,9 @@ public class VectorSymbols
     /** The Mac Roman bytes of the symbols we use, in the Sonata layout. */
     private static final Map<Integer, Kind> SONATA = new HashMap<>();
 
+    /** The glyph names of the symbols we use, in the Emmentaler font of LilyPond. */
+    private static final Map<String, Kind> EMMENTALER = new HashMap<>();
+
     /** The music fonts with the Sonata layout. */
     private static final Set<String> SONATA_FONTS = Set.of(
             "Engraver",
@@ -106,6 +110,28 @@ public class VectorSymbols
     private static final Charset MAC_ROMAN = Charset.forName("x-MacRoman");
 
     static {
+        emmentaler(Kind.HEAD_BREVE, "noteheads.sM1", "noteheads.sM1double");
+        emmentaler(Kind.HEAD_WHOLE, "noteheads.s0");
+        emmentaler(Kind.HEAD_VOID, "noteheads.s1");
+        emmentaler(Kind.HEAD_BLACK, "noteheads.s2");
+        emmentaler(Kind.CLEF_G, "clefs.G", "clefs.G_change");
+        emmentaler(Kind.CLEF_C, "clefs.C", "clefs.C_change");
+        emmentaler(Kind.CLEF_F, "clefs.F", "clefs.F_change");
+        emmentaler(Kind.FLAT, "accidentals.flat");
+        emmentaler(Kind.NATURAL, "accidentals.natural");
+        emmentaler(Kind.SHARP, "accidentals.sharp");
+        emmentaler(Kind.DOUBLE_SHARP, "accidentals.doublesharp");
+        emmentaler(Kind.DOUBLE_FLAT, "accidentals.flatflat");
+        emmentaler(Kind.AUGMENTATION_DOT, "dots.dot");
+        emmentaler(Kind.STACCATO, "scripts.staccato");
+        emmentaler(Kind.REST_WHOLE, "rests.0", "rests.0o");
+        emmentaler(Kind.REST_HALF, "rests.1", "rests.1o");
+        emmentaler(Kind.REST_QUARTER, "rests.2");
+        emmentaler(Kind.REST_8TH, "rests.3");
+        emmentaler(Kind.REST_16TH, "rests.4");
+        emmentaler(Kind.REST_32ND, "rests.5");
+        emmentaler(Kind.REST_64TH, "rests.6");
+
         smufl(Kind.HEAD_BREVE, 0xE0A0, 0xE0A1);
         smufl(Kind.HEAD_WHOLE, 0xE0A2);
         smufl(Kind.HEAD_VOID, 0xE0A3);
@@ -327,6 +353,38 @@ public class VectorSymbols
         }
     }
 
+    //------------//
+    // emmentaler //
+    //------------//
+    private static void emmentaler (Kind kind,
+                                    String... names)
+    {
+        for (String name : names) {
+            EMMENTALER.put(name, kind);
+        }
+    }
+
+    //----------------//
+    // emmentalerKind //
+    //----------------//
+    /**
+     * Report the kind of symbol a code of the Emmentaler font draws, by the name of its glyph.
+     *
+     * @param font the font
+     * @param code the code in the font
+     * @return the kind of symbol, or null if not Emmentaler or not one we use
+     */
+    private static Kind emmentalerKind (PDFont font,
+                                        int code)
+    {
+        if ((font.getName() == null) || !font.getName().contains("Emmentaler")
+                || !(font instanceof PDSimpleFont simple) || (simple.getEncoding() == null)) {
+            return null;
+        }
+
+        return EMMENTALER.get(simple.getEncoding().getName(code));
+    }
+
     //--------//
     // kindOf //
     //--------//
@@ -479,14 +537,22 @@ public class VectorSymbols
                                   Vector displacement)
             throws IOException
         {
-            final String unicode = font.toUnicode(code);
-
-            if ((unicode == null) || (unicode.length() != 1)
-                    || !(font instanceof PDVectorFont vectorFont)) {
+            if (!(font instanceof PDVectorFont vectorFont)) {
                 return;
             }
 
-            final Kind kind = kindOf(font, unicode.charAt(0));
+            // Emmentaler glyphs are known by their names, and have no unicode
+            Kind kind = emmentalerKind(font, code);
+
+            if (kind == null) {
+                final String unicode = font.toUnicode(code);
+
+                if ((unicode == null) || (unicode.length() != 1)) {
+                    return;
+                }
+
+                kind = kindOf(font, unicode.charAt(0));
+            }
 
             if (kind == null) {
                 return;
