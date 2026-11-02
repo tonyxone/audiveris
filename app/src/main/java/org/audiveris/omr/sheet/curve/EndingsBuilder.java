@@ -252,7 +252,16 @@ public class EndingsBuilder
                 ? constants.minFirstMeasureRatio
                 : constants.minMeasureRatio;
 
-        if (length < (measure.getWidth() * minRatio.getValue())) {
+        double minLength = measure.getWidth() * minRatio.getValue();
+
+        if (measure.getStack() == system.getFirstStack()) {
+            // An ending covers the music of the first measure, which starts after the header
+            final double music = measure.getAbscissa(HorizontalSide.RIGHT, staff)
+                    - staff.getHeaderStop();
+            minLength = Math.min(minLength, music * constants.minMeasureRatio.getValue());
+        }
+
+        if (length < minLength) {
             logger.debug("Ending {} too short compared with related {}", segment, measure);
 
             return null;
