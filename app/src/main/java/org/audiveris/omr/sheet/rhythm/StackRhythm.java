@@ -443,7 +443,7 @@ public class StackRhythm
             for (List<AbstractChordInter> group : plainGroups(measure)) {
                 final Rational total = group.get(0).getDurationSansTuplet().times(group.size());
 
-                if (!total.equals(beat)) {
+                if (!total.equals(beat) && !completesBeat(group)) {
                     groups.add(group);
                 }
             }
@@ -1030,6 +1030,30 @@ public class StackRhythm
         }
 
         return false;
+    }
+
+    //---------------//
+    // completesBeat //
+    //---------------//
+    /**
+     * Whether a group starts off the grid of twice its chord value, as after a rest of one
+     * value, and ends on the grid of four: it then completes a plain beat and is no tuplet,
+     * which would start on the grid.
+     * In Chopin's Fantaisie-Impromptu, three sixteenths after a sixteenth rest make a beat
+     * against the sextuplets of the other hand.
+     */
+    private static boolean completesBeat (List<AbstractChordInter> group)
+    {
+        final Rational start = group.get(0).getTimeOffset();
+        final Rational dur = group.get(0).getDurationSansTuplet();
+
+        if ((start == null) || (dur == null)) {
+            return false;
+        }
+
+        final Rational end = start.plus(dur.times(group.size()));
+
+        return (start.divides(dur.times(2)).den != 1) && (end.divides(dur.times(4)).den == 1);
     }
 
     //------------//
