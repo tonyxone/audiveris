@@ -1566,7 +1566,7 @@ public class SigReducer
     // isClefPiece //
     //-------------//
     /**
-     * Report whether the inter lies within the clef and is a hollow head, a chord or stem
+     * Report whether the inter lies within the clef and is a hollow or small head, a chord or stem
      * of such heads only, or a slur: what the pieces of a clef can be misread as.
      *
      * @param inter the inter to check
@@ -1587,7 +1587,9 @@ public class SigReducer
         }
 
         if (inter instanceof HeadInter) {
-            return inter.getShape() == Shape.NOTEHEAD_VOID;
+            return (inter.getShape() == Shape.NOTEHEAD_VOID)
+                    || (inter.getShape() == Shape.NOTEHEAD_BLACK_SMALL)
+                    || (inter.getShape() == Shape.NOTEHEAD_VOID_SMALL);
         }
 
         final Collection<? extends Inter> heads;
