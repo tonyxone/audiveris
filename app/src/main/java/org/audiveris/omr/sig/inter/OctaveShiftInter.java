@@ -975,7 +975,7 @@ public class OctaveShiftInter
                 // The value may come with the dashes of its line, and with what lies beyond
                 matcher = DASHED_OCTAVE_WORD.matcher(word.getValue());
 
-                if (!matcher.matches() || ((glyph = leadingPiece(glyph, sheet)) == null)) {
+                if (!matcher.matches() || ((glyph = leadingPiece(glyph, word.getValue(), sheet)) == null)) {
                     continue;
                 }
             }
@@ -1014,23 +1014,34 @@ public class OctaveShiftInter
     // leadingPiece //
     //--------------//
     /**
-     * Report the first piece of a word glyph, if it has the size of an octave value.
+     * Report the first piece of a word glyph, past an opening parenthesis, if it has the size
+     * of an octave value.
      *
      * @param glyph the word glyph
+     * @param value the word value
      * @param sheet the containing sheet
      * @return the registered glyph of the value, or null
      */
     private static Glyph leadingPiece (Glyph glyph,
+                                       String value,
                                        Sheet sheet)
     {
         final int interline = sheet.getScale().getInterline();
-        Glyph first = null;
+        final List<Glyph> pieces = GlyphFactory.buildGlyphs(
+                glyph.getRunTable(),
+                glyph.getTopLeft());
+        Collections.sort(pieces, Comparator.comparingInt(Glyph::getLeft));
 
-        for (Glyph piece : GlyphFactory.buildGlyphs(glyph.getRunTable(), glyph.getTopLeft())) {
-            if ((first == null) || (piece.getLeft() < first.getLeft())) {
-                first = piece;
-            }
+        // A parenthesis may come in thin fragments
+        final boolean paren = value.startsWith("(");
+        int index = 0;
+
+        while (paren && (index < pieces.size()) && (pieces.get(index).getWidth() < (constants
+                .maxParenWidth.getValue() * interline))) {
+            index++;
         }
+
+        final Glyph first = (pieces.size() > index) ? pieces.get(index) : null;
 
         if ((first == null) || (first.getHeight() < (constants.minValueHeight.getValue()
                 * interline)) || (first.getWidth() > (constants.maxValueWidth.getValue()
@@ -1038,7 +1049,22 @@ public class OctaveShiftInter
             return null;
         }
 
-        return sheet.getGlyphIndex().registerOriginal(first);
+        if (!paren) {
+            return sheet.getGlyphIndex().registerOriginal(first);
+        }
+
+        // Within parentheses, the line starts after the closing one
+        final int maxX = first.getLeft() + first.getWidth() + (int) Math.round(constants
+                .maxParenWidth.getValue() * interline);
+        final List<Glyph> parts = new ArrayList<>();
+
+        for (Glyph piece : pieces) {
+            if (piece.getLeft() <= maxX) {
+                parts.add(piece);
+            }
+        }
+
+        return sheet.getGlyphIndex().registerOriginal(GlyphFactory.buildGlyph(parts));
     }
 
     //---------------//
@@ -1434,8 +1460,12 @@ public class OctaveShiftInter
                 "Ratio of gaps to the staves around a sign below which it applies to the upper one");
 
         private final Constant.Ratio minValueHeight = new Constant.Ratio(
-                0.8,
+                0.5,
                 "Minimum height, in interlines, of an octave value read within a longer word");
+
+        private final Constant.Ratio maxParenWidth = new Constant.Ratio(
+                0.4,
+                "Maximum width, in interlines, of a parenthesis around an octave value");
 
         private final Constant.Ratio maxValueWidth = new Constant.Ratio(
                 1.5,
