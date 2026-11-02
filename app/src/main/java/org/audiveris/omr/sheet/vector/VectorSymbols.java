@@ -377,12 +377,20 @@ public class VectorSymbols
     private static Kind emmentalerKind (PDFont font,
                                         int code)
     {
-        if ((font.getName() == null) || !font.getName().contains("Emmentaler")
-                || !(font instanceof PDSimpleFont simple) || (simple.getEncoding() == null)) {
+        if (!isEmmentaler(font) || !(font instanceof PDSimpleFont simple)
+                || (simple.getEncoding() == null)) {
             return null;
         }
 
         return EMMENTALER.get(simple.getEncoding().getName(code));
+    }
+
+    //--------------//
+    // isEmmentaler //
+    //--------------//
+    private static boolean isEmmentaler (PDFont font)
+    {
+        return (font.getName() != null) && font.getName().contains("Emmentaler");
     }
 
     //--------//
@@ -543,6 +551,10 @@ public class VectorSymbols
 
             // Emmentaler glyphs are known by their names, and have no unicode
             Kind kind = emmentalerKind(font, code);
+
+            if ((kind == null) && isEmmentaler(font)) {
+                return;
+            }
 
             if (kind == null) {
                 final String unicode = font.toUnicode(code);
