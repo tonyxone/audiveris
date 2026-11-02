@@ -274,18 +274,24 @@ public class EndingsBuilder
         final int leftStaffY = staff.getFirstLine().yAt(leftPt.x);
         final Filament leftLeg = lookupLeg(seg, leftPt, leftStaffY, system);
 
-        // An ending starts with its left leg down toward the staff: a pedal line, a hairpin or
-        // the line of an octave sign has none
-        if (leftLeg == null) {
-            logger.debug("Ending {} has no left leg", segment);
-
-            return null;
-        }
-
         // Right leg (optional)
         final Point rightPt = seg.getEnd(false);
         final int rightStaffY = staff.getFirstLine().yAt(rightPt.x);
         final Filament rightLeg = lookupLeg(seg, rightPt, rightStaffY, system);
+
+        // An ending starts with its left leg down toward the staff: a pedal line, a hairpin or
+        // the line of an octave sign has none. Only an ending continued from the previous line
+        // starts without, just after the staff header, and it then ends with its right leg.
+        if (leftLeg == null) {
+            final boolean continued = (rightLeg != null)
+                    && (leftPt.x <= (staff.getHeaderStop() + params.maxHeaderGap));
+
+            if (!continued) {
+                logger.debug("Ending {} has no left leg", segment);
+
+                return null;
+            }
+        }
 
         // Middle legs if any (each would split segment line into separate endings)
         final List<Filament> middleLegs = getMiddleLegs(segment, staff);
@@ -538,6 +544,10 @@ public class EndingsBuilder
         private final Scale.Fraction maxBend = new Scale.Fraction(
                 0.5,
                 "Maximum height of an ending line beyond its slope, where a slur bends");
+
+        private final Scale.Fraction maxHeaderGap = new Scale.Fraction(
+                2.0,
+                "Maximum gap from staff header to the start of an ending continued on a new line");
     }
 
     //------------//
@@ -553,12 +563,15 @@ public class EndingsBuilder
 
         final int maxBend;
 
+        final int maxHeaderGap;
+
         Parameters (Scale scale)
         {
             super(scale);
 
             maxBarShift = scale.toPixels(EndingBarRelation.getXGapMaximum(Profiles.STRICT));
             maxBend = scale.toPixels(constants.maxBend);
+            maxHeaderGap = scale.toPixels(constants.maxHeaderGap);
         }
     }
 }

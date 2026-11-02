@@ -1211,14 +1211,24 @@ public class PartwiseBuilder
                 // Try to infer an endingNumber
                 boolean isFirstNumber = true;
                 final Measure prevMeasure = current.measure.getPrecedingInPage();
+                String continuedNumber = null;
                 if (prevMeasure != null) {
                     final PartBarline prevBar = prevMeasure.getRightPartBarline();
-                    if (prevBar != null && prevBar.getEnding(RIGHT) != null) {
+                    final EndingInter prevEnding = (prevBar != null) ? prevBar.getEnding(RIGHT)
+                            : null;
+                    if (prevEnding != null) {
+                        // An ending with no left leg continues the one ending the previous line
+                        if ((ending.getLeftLeg() == null)
+                                && (prevMeasure.getStack().getSystem() != stack.getSystem())) {
+                            continuedNumber = prevEnding.getExportedNumber();
+                        }
+
                         isFirstNumber = false;
                     }
                 }
 
-                ending.setNumber(endingNumber = isFirstNumber ? "1" : "2");
+                ending.setNumber(endingNumber = (continuedNumber != null) ? continuedNumber
+                        : (isFirstNumber ? "1" : "2"));
             }
 
             // Is export of barline element really needed? MusicXML says that if we just have a
