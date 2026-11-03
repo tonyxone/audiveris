@@ -42,6 +42,7 @@ import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.vector.VectorChecker;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.ClefInter;
+import org.audiveris.omr.sig.inter.FlagInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.SmallChordInter;
 import org.audiveris.omr.sig.relation.Exclusion;
@@ -215,6 +216,22 @@ public class SymbolsBuilder
                 Grades.symbolMinGrade,
                 EnumSet.of(Classifier.Condition.CHECKED));
 
+        // A flag the PDF draws there is proposed, from its own pixels, when the classifier proposes
+        // no flag for the glyph and none is there yet: it may score a plain flag too low to keep it
+        final Map.Entry<Shape, Glyph> drawnFlag = isFlagged(glyph, evals) ? null
+                : VectorChecker.drawnFlag(glyph, system);
+
+        if (drawnFlag != null) {
+            final Evaluation flagEval = new Evaluation(
+                    drawnFlag.getKey(),
+                    constants.drawnFlagGrade.getValue());
+            final Inter flag = factory.create(flagEval, drawnFlag.getValue(), closestStaff);
+
+            if (flag != null) {
+                logger.debug("{} read from the PDF", flag);
+            }
+        }
+
         // A time signature the PDF draws there replaces any the classifier proposes
         final Shape drawnTime = VectorChecker.drawnTime(glyph, system);
 
@@ -267,6 +284,38 @@ public class SymbolsBuilder
                 logger.warn("Error in glyph evaluation " + ex, ex);
             }
         }
+    }
+
+    //-----------//
+    // isFlagged //
+    //-----------//
+    /**
+     * Whether the classifier proposes a flag for a glyph with some confidence, or a flag is
+     * already there.
+     *
+     * @param glyph the glyph to check
+     * @param evals the classifier evaluations of the glyph
+     * @return true if so
+     */
+    private boolean isFlagged (Glyph glyph,
+                               Evaluation[] evals)
+    {
+        for (Evaluation eval : evals) {
+            if ((ShapeSet.FlagsUp.contains(eval.shape) || ShapeSet.FlagsDown.contains(eval.shape))
+                    && (eval.grade >= constants.minFlagGrade.getValue())) {
+                return true;
+            }
+        }
+
+        final Rectangle box = glyph.getBounds();
+
+        for (Inter flag : system.getSig().inters(FlagInter.class)) {
+            if (flag.getBounds().intersects(box)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     //-----------------//
@@ -535,6 +584,14 @@ public class SymbolsBuilder
         private final Scale.Fraction maxClefChangeMargin = new Scale.Fraction(
                 1.5,
                 "Maximum extent of a small treble clef above or below its staff");
+
+        private final Constant.Ratio minFlagGrade = new Constant.Ratio(
+                0.5,
+                "Classifier grade from which a flag proposed for a glyph needs no help from the PDF");
+
+        private final Constant.Ratio drawnFlagGrade = new Constant.Ratio(
+                0.8,
+                "Grade given to a flag that the PDF draws");
 
         private final Constant.Ratio drawnTimeGrade = new Constant.Ratio(
                 0.9,

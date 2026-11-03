@@ -141,6 +141,15 @@ public class VectorSymbols
             smufl(kind, 0xE080 + d);
         }
 
+        for (int f = 0; f < 4; f++) {
+            final Kind up = Kind.values()[Kind.FLAG_1_UP.ordinal() + (2 * f)];
+            final Kind down = Kind.values()[Kind.FLAG_1_DOWN.ordinal() + (2 * f)];
+            emmentaler(up, "flags.u" + (f + 3));
+            emmentaler(down, "flags.d" + (f + 3));
+            smufl(up, 0xE240 + (2 * f));
+            smufl(down, 0xE241 + (2 * f));
+        }
+
         smufl(Kind.OCTAVE_8, 0xE510, 0xE511, 0xE512, 0xE513, 0xE51C);
         smufl(Kind.OCTAVE_15, 0xE514, 0xE515, 0xE516, 0xE51D);
         smufl(Kind.OCTAVE_22, 0xE517, 0xE518, 0xE519, 0xE51E);
@@ -213,7 +222,8 @@ public class VectorSymbols
         DOT,
         REST,
         TIME,
-        OCTAVE;
+        OCTAVE,
+        FLAG;
     }
 
     /** The symbols we read. */
@@ -255,7 +265,16 @@ public class VectorSymbols
         OCTAVE_22(Category.OCTAVE),
         /** A lone italic value, which is an octave sign only if a line follows it. */
         OCTAVE_8_BARE(Category.OCTAVE),
-        OCTAVE_15_BARE(Category.OCTAVE);
+        OCTAVE_15_BARE(Category.OCTAVE),
+        /** Flags of a stem up (hanging down from its top) or down, by count of beams. */
+        FLAG_1_UP(Category.FLAG),
+        FLAG_1_DOWN(Category.FLAG),
+        FLAG_2_UP(Category.FLAG),
+        FLAG_2_DOWN(Category.FLAG),
+        FLAG_3_UP(Category.FLAG),
+        FLAG_3_DOWN(Category.FLAG),
+        FLAG_4_UP(Category.FLAG),
+        FLAG_4_DOWN(Category.FLAG);
 
         public final Category category;
 
