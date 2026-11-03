@@ -21,11 +21,18 @@
 // </editor-fold>
 package org.audiveris.omr.sheet.symbol;
 
+import org.audiveris.omr.constant.Constant;
+import org.audiveris.omr.constant.ConstantSet;
+import org.audiveris.omr.glyph.Glyph;
+import org.audiveris.omr.glyph.Shape;
+import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.rhythm.MeasureStack;
 import org.audiveris.omr.sheet.rhythm.TupletsBuilder;
+import org.audiveris.omr.sheet.vector.VectorChecker;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.AbstractChordInter;
+import org.audiveris.omr.sig.inter.AlterInter;
 import org.audiveris.omr.sig.inter.BeamGroupInter;
 import org.audiveris.omr.sig.inter.DynamicsInter;
 import org.audiveris.omr.sig.inter.FermataInter;
@@ -49,6 +56,9 @@ import org.audiveris.omr.util.HorizontalSide;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.awt.Rectangle;
+
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
@@ -62,6 +72,8 @@ import java.util.List;
 public class SymbolsLinker
 {
     //~ Static fields/initializers -----------------------------------------------------------------
+
+    private static final Constants constants = new Constants();
 
     private static final Logger logger = LoggerFactory.getLogger(SymbolsLinker.class);
 
@@ -367,6 +379,57 @@ public class SymbolsLinker
         linkNumbers();
 
         // Check for any key signature change (before "abnormal" alters are removed)
+        addMissedAlters();
         KeyInter.lookupCandidates(system);
+    }
+
+    //-----------------//
+    // addMissedAlters //
+    //-----------------//
+    /**
+     * Add the naturals, sharps and flats a vector PDF draws where the image analysis found
+     * no alter: the naturals of a key change, after a barline and before a new time signature,
+     * can get lost with them, and the notes keep the old key.
+     * Those that make no key are removed later as abnormal, as any alter not tied to a head.
+     */
+    private void addMissedAlters ()
+    {
+        final List<Rectangle> known = new ArrayList<>();
+
+        for (Inter inter : sig.inters(AlterInter.class)) {
+            known.add(inter.getBounds());
+        }
+
+        for (Shape shape : new Shape[] { Shape.NATURAL, Shape.SHARP, Shape.FLAT }) {
+            for (Glyph glyph : VectorChecker.missedGlyphs(system, shape, known)) {
+                final Staff staff = system.getClosestStaff(glyph.getCenter2D());
+
+                if (staff == null) {
+                    continue;
+                }
+
+                final AlterInter alter = AlterInter.create(
+                        glyph,
+                        shape,
+                        constants.drawnAlterGrade.getValue(),
+                        staff);
+                sig.addVertex(alter);
+                known.add(alter.getBounds());
+                logger.debug("{} read from the PDF", alter);
+            }
+        }
+    }
+
+    //~ Inner Classes ------------------------------------------------------------------------------
+
+    //-----------//
+    // Constants //
+    //-----------//
+    private static class Constants
+            extends ConstantSet
+    {
+        private final Constant.Ratio drawnAlterGrade = new Constant.Ratio(
+                0.8,
+                "Grade of an alter read from the PDF");
     }
 }
