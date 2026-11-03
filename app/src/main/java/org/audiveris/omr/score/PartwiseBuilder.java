@@ -1788,6 +1788,19 @@ public class PartwiseBuilder
                 setFontInfo(pmWords, sentence);
 
                 directionType.getWordsOrSymbol().add(pmWords);
+
+                // A da capo or a fine written as words tells the playing where to go
+                if (TextRole.isDaCapo(content) || TextRole.isFine(content)) {
+                    final Sound sound = factory.createSound();
+
+                    if (TextRole.isDaCapo(content)) {
+                        sound.setDacapo(YesNo.YES);
+                    } else {
+                        sound.setFine("yes");
+                    }
+
+                    direction.setSound(sound);
+                }
             }
 
             // Everything is now OK

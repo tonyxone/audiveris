@@ -406,6 +406,28 @@ public class SentenceInter
         // TODO: should we update sentence grade?
     }
 
+    //----------//
+    // endStack //
+    //----------//
+    /**
+     * Report the measure stack where this sentence ends, the last one of the system if it ends
+     * beyond the last barline.
+     */
+    private MeasureStack endStack (SystemInfo system)
+    {
+        final Point2D end = new Point2D.Double((bounds.x + bounds.width) - 1, getLocation().getY());
+        final MeasureStack stack = system.getStackAt(end);
+
+        if (stack != null) {
+            return stack;
+        }
+
+        final MeasureStack last = system.getLastStack();
+
+        return ((last != null) && (end.getX() >= last.getLeft())) ? last : system.getStackAt(
+                getLocation());
+    }
+
     //------//
     // link //
     //------//
@@ -443,7 +465,10 @@ public class SentenceInter
                 case Direction -> {
                     if (!sig.hasRelation(this, ChordSentenceRelation.class)) {
                         // Map sentence with proper chord, preferably above for a direction
-                        final MeasureStack stack = system.getStackAt(location);
+                        // A da capo or a fine is aligned on the end of its measure
+                        final boolean navigation = TextRole.isNavigation(getValue());
+                        final MeasureStack stack = navigation ? endStack(system) : system
+                                .getStackAt(location);
 
                         if (stack == null) {
                             logger.info("No measure stack for {} {}", this, getValue());
@@ -452,10 +477,17 @@ public class SentenceInter
                             final Rectangle box = new Rectangle(bounds);
                             box.grow(xGapMax, 0);
 
-                            final AbstractChordInter chord = stack.getEventChord(
-                                    location,
-                                    box,
-                                    true);
+                            AbstractChordInter chord = stack.getEventChord(location, box, true);
+
+                            // A da capo or a fine, often after the music, belongs to the measure
+                            if ((chord == null) && navigation) {
+                                for (AbstractChordInter ch : stack.getStandardChords()) {
+                                    if ((chord == null) || (ch.getCenter().x > chord
+                                            .getCenter().x)) {
+                                        chord = ch;
+                                    }
+                                }
+                            }
 
                             if (chord != null) {
                                 sig.addEdge(chord, this, new ChordSentenceRelation());
