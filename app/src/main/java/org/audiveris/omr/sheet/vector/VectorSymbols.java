@@ -223,7 +223,8 @@ public class VectorSymbols
         REST,
         TIME,
         OCTAVE,
-        FLAG;
+        FLAG,
+        TUPLET;
     }
 
     /** The symbols we read. */
@@ -274,7 +275,10 @@ public class VectorSymbols
         FLAG_3_UP(Category.FLAG),
         FLAG_3_DOWN(Category.FLAG),
         FLAG_4_UP(Category.FLAG),
-        FLAG_4_DOWN(Category.FLAG);
+        FLAG_4_DOWN(Category.FLAG),
+        /** A lone italic number, as LilyPond writes the number of a tuplet. */
+        TUPLET_3(Category.TUPLET),
+        TUPLET_6(Category.TUPLET);
 
         public final Category category;
 
@@ -737,7 +741,8 @@ public class VectorSymbols
         // endOctave //
         //-----------//
         /**
-         * End the row of characters: a value left alone, in italics, may be a bare octave sign.
+         * End the row of characters: a value left alone, in italics, may be a bare octave sign,
+         * or the number of a tuplet.
          */
         private void endOctave ()
         {
@@ -745,6 +750,8 @@ public class VectorSymbols
                 final Kind kind = switch (octave.toString()) {
                     case "8" -> Kind.OCTAVE_8_BARE;
                     case "15" -> Kind.OCTAVE_15_BARE;
+                    case "3" -> Kind.TUPLET_3;
+                    case "6" -> Kind.TUPLET_6;
                     default -> null;
                 };
 

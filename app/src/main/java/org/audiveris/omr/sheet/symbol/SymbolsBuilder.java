@@ -40,12 +40,14 @@ import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.vector.VectorChecker;
+import org.audiveris.omr.sheet.vector.VectorSymbols;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.ClefInter;
 import org.audiveris.omr.sig.inter.FlagInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.SmallChordInter;
 import org.audiveris.omr.sig.relation.Exclusion;
+import org.audiveris.omr.sig.inter.TupletInter;
 import org.audiveris.omr.util.Dumping;
 import org.audiveris.omr.util.Navigable;
 import org.audiveris.omr.util.StopWatch;
@@ -177,6 +179,10 @@ public class SymbolsBuilder
         watch.start("processClusters");
         processClusters(systemGraph);
 
+        // Tuplet numbers the PDF draws where none was read
+        watch.start("addDrawnTuplets");
+        addDrawnTuplets();
+
         if (constants.printWatch.isSet()) {
             watch.print();
         }
@@ -282,6 +288,57 @@ public class SymbolsBuilder
                 }
             } catch (Exception ex) {
                 logger.warn("Error in glyph evaluation " + ex, ex);
+            }
+        }
+    }
+
+    //-----------------//
+    // addDrawnTuplets //
+    //-----------------//
+    /**
+     * Propose the tuplet numbers a PDF draws where no tuplet sign was read, each made of the
+     * pixels within its digit: the digit often touches the bracket of the tuplet, and the
+     * glyph of both is no tuplet sign to the classifier. A sign already read there is
+     * confirmed.
+     */
+    private void addDrawnTuplets ()
+    {
+        final int margin = sheet.getInterline() / 2;
+
+        for (Map.Entry<Glyph, VectorSymbols.Kind> entry : VectorChecker.drawnTuplets(system)
+                .entrySet()) {
+            final Glyph glyph = entry.getKey();
+            final Rectangle around = glyph.getBounds();
+            around.grow(margin, margin);
+
+            // A sign already there is confirmed: a weak one is dropped when tuplets get linked
+            final List<Inter> there = system.getSig().inters(TupletInter.class).stream().filter(
+                    t -> t.getBounds().intersects(around)).toList();
+
+            if (!there.isEmpty()) {
+                for (Inter t : there) {
+                    t.setGrade(Math.max(t.getGrade(), constants.drawnTupletGrade.getValue()));
+                }
+
+                continue;
+            }
+
+            final Staff staff = system.getClosestStaff(glyph.getCenter2D());
+
+            if (staff == null) {
+                continue;
+            }
+
+            final Shape shape = (entry.getValue() == VectorSymbols.Kind.TUPLET_6)
+                    ? Shape.TUPLET_SIX
+                    : Shape.TUPLET_THREE;
+            final Inter tuplet = factory.create(
+                    new Evaluation(shape, constants.drawnTupletGrade.getValue()),
+                    glyph,
+                    staff);
+
+            if (tuplet != null) {
+                logger.debug("{} read from the PDF", tuplet);
             }
         }
     }
@@ -584,6 +641,10 @@ public class SymbolsBuilder
         private final Scale.Fraction maxClefChangeMargin = new Scale.Fraction(
                 1.5,
                 "Maximum extent of a small treble clef above or below its staff");
+
+        private final Constant.Ratio drawnTupletGrade = new Constant.Ratio(
+                0.8,
+                "Grade given to a tuplet number that the PDF draws");
 
         private final Constant.Ratio minFlagGrade = new Constant.Ratio(
                 0.5,
