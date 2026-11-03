@@ -923,19 +923,25 @@ public class Measure
     /**
      * Report the potential key signature in this measure for the specified staff index
      * in part.
+     * <p>
+     * A key change may first cancel the old key with naturals, then give the new one: the key in
+     * force is the last one.
      *
      * @param staffIndexInPart staff index in part
      * @return the staff key signature, or null if not found
      */
     public KeyInter getKey (int staffIndexInPart)
     {
+        KeyInter last = null;
+
         for (KeyInter key : keys) {
-            if (key.getStaff().getIndexInPart() == staffIndexInPart) {
-                return key;
+            if ((key.getStaff().getIndexInPart() == staffIndexInPart) && ((last == null) || (key
+                    .getCenter().x > last.getCenter().x))) {
+                last = key;
             }
         }
 
-        return null;
+        return last;
     }
 
     //--------//
