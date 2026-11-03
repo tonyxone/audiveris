@@ -1189,8 +1189,10 @@ public class OctaveShiftInter
             }
         }
 
+        // A staff that does not span the sign, as the first one of an indented system, is no
+        // candidate
         if ((upper == null) || (lower == null)) {
-            return closest;
+            return (lower != null) ? lower : ((upper != null) ? upper : closest);
         }
 
         if (upperGap < (constants.maxUpperStaffRatio.getValue() * lowerGap)) {
