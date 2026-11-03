@@ -141,6 +141,10 @@ public class VectorSymbols
             smufl(kind, 0xE080 + d);
         }
 
+        smufl(Kind.OCTAVE_8, 0xE510, 0xE511, 0xE512, 0xE513, 0xE51C);
+        smufl(Kind.OCTAVE_15, 0xE514, 0xE515, 0xE516, 0xE51D);
+        smufl(Kind.OCTAVE_22, 0xE517, 0xE518, 0xE519, 0xE51E);
+
         smufl(Kind.HEAD_BREVE, 0xE0A0, 0xE0A1);
         smufl(Kind.HEAD_WHOLE, 0xE0A2);
         smufl(Kind.HEAD_VOID, 0xE0A3);
@@ -208,7 +212,8 @@ public class VectorSymbols
         ACCIDENTAL,
         DOT,
         REST,
-        TIME;
+        TIME,
+        OCTAVE;
     }
 
     /** The symbols we read. */
@@ -244,7 +249,10 @@ public class VectorSymbols
         TIME_6(Category.TIME),
         TIME_7(Category.TIME),
         TIME_8(Category.TIME),
-        TIME_9(Category.TIME);
+        TIME_9(Category.TIME),
+        OCTAVE_8(Category.OCTAVE),
+        OCTAVE_15(Category.OCTAVE),
+        OCTAVE_22(Category.OCTAVE);
 
         public final Category category;
 
@@ -554,6 +562,15 @@ public class VectorSymbols
 
         private final List<Symbol> symbols = new ArrayList<>();
 
+        /** The characters drawn in a row so far, that may make an octave sign. */
+        private final StringBuilder octave = new StringBuilder();
+
+        /** The bounds of the octave value drawn so far. */
+        private Rectangle2D octaveValue;
+
+        /** The right end of the last character of the row. */
+        private double octaveRight;
+
         GlyphCollector (PDRectangle box,
                         double sx,
                         double sy)
@@ -572,34 +589,56 @@ public class VectorSymbols
             throws IOException
         {
             if (!(font instanceof PDVectorFont vectorFont)) {
+                octave.setLength(0);
                 return;
             }
+
+            final Rectangle2D bounds = boundsOf(textRenderingMatrix, font, vectorFont, code);
 
             // Emmentaler glyphs are known by their names, and have no unicode
             Kind kind = emmentalerKind(font, code);
+            Character c = null;
 
-            if ((kind == null) && isEmmentaler(font)) {
-                return;
-            }
-
-            if (kind == null) {
+            if (isEmmentaler(font)) {
+                if ((kind != null) && (kind.category == Category.TIME)) {
+                    c = (char) ('0' + kind.digit());
+                }
+            } else {
                 final String unicode = font.toUnicode(code);
 
-                if ((unicode == null) || (unicode.length() != 1)) {
-                    return;
+                if ((unicode != null) && (unicode.length() == 1)) {
+                    c = unicode.charAt(0);
+                    kind = kindOf(font, c);
                 }
-
-                kind = kindOf(font, unicode.charAt(0));
             }
 
-            if (kind == null) {
+            if (bounds == null) {
                 return;
             }
 
+            trackOctave(c, bounds);
+
+            if (kind != null) {
+                symbols.add(new Symbol(kind, bounds, false));
+            }
+        }
+
+        //----------//
+        // boundsOf //
+        //----------//
+        /**
+         * The bounds of a glyph, in sheet pixels, or null if it draws nothing.
+         */
+        private Rectangle2D boundsOf (Matrix textRenderingMatrix,
+                                      PDFont font,
+                                      PDVectorFont vectorFont,
+                                      int code)
+            throws IOException
+        {
             final GeneralPath glyph = vectorFont.getNormalizedPath(code);
 
             if (glyph == null) {
-                return;
+                return null;
             }
 
             // Glyph space -> PDF user space (y up) -> sheet pixels (y down)
@@ -609,18 +648,61 @@ public class VectorSymbols
             final Rectangle2D user = at.createTransformedShape(glyph).getBounds2D();
 
             if (user.isEmpty()) {
+                return null;
+            }
+
+            return new Rectangle2D.Double(
+                    (user.getMinX() - box.getLowerLeftX()) * sx,
+                    (box.getUpperRightY() - user.getMaxY()) * sy,
+                    user.getWidth() * sx,
+                    user.getHeight() * sy);
+        }
+
+        //-------------//
+        // trackOctave //
+        //-------------//
+        /**
+         * Follow the characters drawn in a row, to find the octave signs written as text: a
+         * value (8, 15, 22) followed by its letters (va, vb, ma, mb), as LilyPond writes them
+         * with its own digits and the letters of a text font.
+         * A symbol is then recorded with the bounds of the value.
+         */
+        private void trackOctave (Character c,
+                                  Rectangle2D bounds)
+        {
+            final boolean near = (octave.length() > 0) && (bounds.getMinX() - octaveRight
+                    < octaveValue.getHeight()) && (Math.abs(bounds.getMaxY() - octaveValue
+                            .getMaxY()) < (0.5 * octaveValue.getHeight()));
+
+            if ((c != null) && Character.isDigit(c)) {
+                if (near && octave.chars().allMatch(Character::isDigit)) {
+                    octave.append(c);
+                    octaveValue = octaveValue.createUnion(bounds);
+                } else {
+                    octave.setLength(0);
+                    octave.append(c);
+                    octaveValue = (Rectangle2D) bounds.clone();
+                }
+            } else if ((c != null) && near && ("vmab".indexOf(c) >= 0)) {
+                octave.append(c);
+            } else {
+                octave.setLength(0);
                 return;
             }
 
-            symbols.add(
-                    new Symbol(
-                            kind,
-                            new Rectangle2D.Double(
-                                    (user.getMinX() - box.getLowerLeftX()) * sx,
-                                    (box.getUpperRightY() - user.getMaxY()) * sy,
-                                    user.getWidth() * sx,
-                                    user.getHeight() * sy),
-                            false));
+            octaveRight = bounds.getMaxX();
+
+            final Kind kind = switch (octave.toString()) {
+                case "8va", "8vb" -> Kind.OCTAVE_8;
+                case "15ma", "15mb" -> Kind.OCTAVE_15;
+                case "22ma", "22mb" -> Kind.OCTAVE_22;
+                default -> null;
+            };
+
+            if (kind != null) {
+                symbols.add(new Symbol(kind, octaveValue, false));
+                octave.setLength(0);
+            }
         }
     }
 }

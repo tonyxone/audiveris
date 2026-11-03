@@ -134,8 +134,9 @@ public class LinksStep
         // Because key change detection requires access to effective clef and key
         new MeasureFiller(system).process();
 
-        // Octave signs whose value was read as a word
+        // Octave signs whose value was read as a word, or that only the PDF tells
         OctaveShiftInter.fromWords(system);
+        OctaveShiftInter.fromDrawn(system);
 
         watch.start("SymbolsLinker");
         new SymbolsLinker(system).process();

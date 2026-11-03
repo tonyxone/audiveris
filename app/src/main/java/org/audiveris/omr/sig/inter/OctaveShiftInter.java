@@ -34,6 +34,8 @@ import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.StaffManager;
 import org.audiveris.omr.sheet.SystemInfo;
+import org.audiveris.omr.sheet.vector.VectorChecker;
+import org.audiveris.omr.sheet.vector.VectorSymbols;
 import org.audiveris.omr.sheet.ui.ObjectEditor.Handle;
 import org.audiveris.omr.sheet.ui.ObjectUIModel;
 import org.audiveris.omr.sheet.ui.StubsController;
@@ -902,6 +904,25 @@ public class OctaveShiftInter
                                 double grade,
                                 Staff closestStaff)
     {
+        return create(glyph, shape, grade, closestStaff, true);
+    }
+
+    /**
+     * (Try to) create an instance of OctaveShiftInter.
+     *
+     * @param glyph        the underlying glyph (just the value part, with no dash part)
+     * @param shape        OTTAVA, QUINDICESIMA or VENTIDUESIMA
+     * @param grade        interpretation quality
+     * @param closestStaff closest staff, which may not be the right one!
+     * @param checkText    true to discard a glyph better read as a character of text
+     * @return the created instance or null
+     */
+    private static Inter create (Glyph glyph,
+                                 Shape shape,
+                                 double grade,
+                                 Staff closestStaff,
+                                 boolean checkText)
+    {
         // Item cannot be located within staff height
         final Point center = glyph.getCenter();
 
@@ -919,7 +940,7 @@ public class OctaveShiftInter
             return null;
         }
 
-        if (isWithinText(glyph, sheet)) {
+        if (checkText && isWithinText(glyph, sheet)) {
             logger.debug("OctaveShift value {} is a character of text, discarded", glyph);
             return null;
         }
@@ -939,6 +960,63 @@ public class OctaveShiftInter
         os.setStaff(staff);
 
         return os;
+    }
+
+    //-----------//
+    // fromDrawn //
+    //-----------//
+    /**
+     * Read the octave signs a vector PDF draws in a system where none was recognized: the
+     * value of the sign, from the black pixels within its drawn bounds, followed along its line.
+     *
+     * @param system the system to process
+     */
+    public static void fromDrawn (SystemInfo system)
+    {
+        final Sheet sheet = system.getSheet();
+        final int margin = sheet.getScale().getInterline() / 2;
+        final List<Inter> known = system.getSig().inters(OctaveShiftInter.class);
+
+        for (Map.Entry<Glyph, VectorSymbols.Kind> entry : VectorChecker.drawnOctaves(system)
+                .entrySet()) {
+            final Glyph glyph = entry.getKey();
+            final Rectangle around = glyph.getBounds();
+            around.grow(margin, margin);
+
+            // A sign already recognized there is confirmed: the value of a weak one may get
+            // purged otherwise. Its bounds take its line in, so compare with its value.
+            final List<Inter> there = known.stream().filter(
+                    os -> ((os.getGlyph() != null) ? os.getGlyph().getBounds() : os.getBounds())
+                            .intersects(around)).toList();
+
+            if (!there.isEmpty()) {
+                for (Inter os : there) {
+                    os.setGrade(Math.max(os.getGrade(), constants.drawnGrade.getValue()));
+                }
+
+                continue;
+            }
+
+            final Staff staff = system.getClosestStaff(glyph.getCenter2D());
+
+            if (staff == null) {
+                continue;
+            }
+
+            final Shape shape = switch (entry.getValue()) {
+                case OCTAVE_15 -> Shape.QUINDICESIMA;
+                case OCTAVE_22 -> Shape.VENTIDUESIMA;
+                default -> Shape.OTTAVA;
+            };
+
+            final Inter os = create(glyph, shape, constants.drawnGrade.getValue(), staff, false);
+
+            if (os != null) {
+                logger.debug("{} read from the PDF", os);
+                system.getSig().addVertex(os);
+                known.add(os);
+            }
+        }
     }
 
     //-----------//
@@ -1454,6 +1532,10 @@ public class OctaveShiftInter
         private final Constant.Ratio minTextRun = new Constant.Ratio(
                 2.8,
                 "Run of tall ink, in value widths, from which the value may be a text character");
+
+        private final Constant.Ratio drawnGrade = new Constant.Ratio(
+                0.8,
+                "Grade of an octave sign read from the PDF");
 
         private final Constant.Ratio maxUpperStaffRatio = new Constant.Ratio(
                 0.3,
