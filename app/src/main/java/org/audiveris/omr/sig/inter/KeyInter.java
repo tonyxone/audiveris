@@ -856,6 +856,55 @@ public class KeyInter
         return measure.getClefBefore(point, staff);
     }
 
+    //-------------//
+    // getNextClef //
+    //-------------//
+    /**
+     * Report the clef that follows a point closely in its measure, before any note head.
+     *
+     * @param staff the related staff
+     * @param point the point
+     * @param scale the sheet scale
+     * @return the clef found, or null
+     */
+    private static ClefInter getNextClef (Staff staff,
+                                          Point point,
+                                          Scale scale)
+    {
+        final Measure measure = staff.getPart().getMeasureAt(point, staff);
+
+        if (measure == null) {
+            return null;
+        }
+
+        final int maxDx = scale.toPixels(constants.maxNextClefDx);
+        ClefInter next = null;
+
+        for (ClefInter clef : measure.getClefs()) {
+            final int x = clef.getCenter().x;
+
+            if ((clef.getStaff() == staff) && (x > point.x) && (x - point.x <= maxDx)
+                    && ((next == null) || (x < next.getCenter().x))) {
+                next = clef;
+            }
+        }
+
+        if (next == null) {
+            return null;
+        }
+
+        // No head in between
+        for (Inter head : staff.getSystem().getSig().inters(HeadInter.class)) {
+            final int x = head.getCenter().x;
+
+            if ((head.getStaff() == staff) && (x > point.x) && (x < next.getCenter().x)) {
+                return null;
+            }
+        }
+
+        return next;
+    }
+
     //-----------------//
     // getEffectiveKey //
     //-----------------//
@@ -1232,7 +1281,7 @@ public class KeyInter
         Integer cancelFifths = null; // Used only for a cancel key
 
         // Determine target pitches to check vertical position
-        final int[] pitches;
+        int[] pitches;
         if (firstShape == Shape.NATURAL) {
             // Special case for Natural (cancel key): we use fifths/pitches of the effective key
             cancelFifths = getNaturalFifths(firstAlter);
@@ -1246,6 +1295,20 @@ public class KeyInter
             pitches = getPitches(clefKind, currentShape);
         } else {
             pitches = getPitches(clefKind, firstShape);
+        }
+
+        // The signs may be placed for a clef change that follows them in the measure, as
+        // LilyPond does for a clef changed at the very start
+        final ClefInter nextClef = getNextClef(staff, pt, scale);
+
+        if ((nextClef != null) && (firstShape != Shape.NATURAL) && SHARP_PITCHES_MAP.containsKey(
+                nextClef.getKind()) && (Math.abs(firstAlter.getPitch() - pitches[0])
+                        > maxPitchDiff)) {
+            final int[] nextPitches = getPitches(nextClef.getKind(), firstShape);
+
+            if (Math.abs(firstAlter.getPitch() - nextPitches[0]) <= maxPitchDiff) {
+                pitches = nextPitches;
+            }
         }
 
         // Look for following signs
@@ -1462,6 +1525,10 @@ public class KeyInter
                 "pitch",
                 0.5,
                 "Maximum acceptable difference in pitch");
+
+        private final Fraction maxNextClefDx = new Fraction(
+                8.0,
+                "Maximum horizontal distance from key signs to a clef change they are placed for");
 
         private final Fraction minXGapToHead = new Fraction(
                 1.5,
