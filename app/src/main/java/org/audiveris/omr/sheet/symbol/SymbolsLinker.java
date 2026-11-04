@@ -50,6 +50,7 @@ import org.audiveris.omr.sig.inter.StemInter;
 import org.audiveris.omr.sig.inter.WedgeInter;
 import org.audiveris.omr.sig.relation.ChordGraceRelation;
 import org.audiveris.omr.sig.relation.Link;
+import org.audiveris.omr.sig.relation.NoExclusion;
 import org.audiveris.omr.sig.relation.Relation;
 import org.audiveris.omr.sig.relation.SlurHeadRelation;
 import org.audiveris.omr.util.HorizontalSide;
@@ -431,7 +432,7 @@ public class SymbolsLinker
             for (Glyph glyph : VectorChecker.missedGlyphs(system, shape, known)) {
                 final Staff staff = system.getClosestStaff(glyph.getCenter2D());
 
-                if ((staff == null) || overlapsHead(glyph.getBounds(), heads)) {
+                if (staff == null) {
                     continue;
                 }
 
@@ -440,11 +441,41 @@ public class SymbolsLinker
                         shape,
                         constants.drawnAlterGrade.getValue(),
                         staff);
+                final Collection<Link> links = alter.searchLinks(system);
+
+                // In a chord, accidentals stand close to its heads and stem: those of the chord
+                // it alters may touch it, and are kept from excluding it; another chord's not
+                final List<Inter> own = new ArrayList<>();
+
+                for (Link link : links) {
+                    if (link.partner instanceof HeadInter head && (head.getChord() != null)) {
+                        own.addAll(head.getChord().getNotes());
+
+                        if (head.getChord().getStem() != null) {
+                            own.add(head.getChord().getStem());
+                        }
+                    }
+                }
+
+                final List<Inter> others = new ArrayList<>(heads);
+                others.removeAll(own);
+
+                if (overlapsHead(glyph.getBounds(), others)) {
+                    continue;
+                }
+
                 sig.addVertex(alter);
                 known.add(alter.getBounds());
 
-                for (Link link : alter.searchLinks(system)) {
+                for (Link link : links) {
                     link.applyTo(alter);
+                }
+
+                for (Inter inter : own) {
+                    if (inter.getBounds().intersects(glyph.getBounds())
+                            && !sig.containsEdge(alter, inter)) {
+                        sig.addEdge(alter, inter, new NoExclusion());
+                    }
                 }
 
                 logger.debug("{} read from the PDF", alter);
