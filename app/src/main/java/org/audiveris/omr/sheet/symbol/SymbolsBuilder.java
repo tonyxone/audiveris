@@ -299,11 +299,19 @@ public class SymbolsBuilder
      * Propose the tuplet numbers a PDF draws where no tuplet sign was read, each made of the
      * pixels within its digit: the digit often touches the bracket of the tuplet, and the
      * glyph of both is no tuplet sign to the classifier. A sign already read there is
-     * confirmed.
+     * confirmed, and one read on a fingering digit is removed.
      */
     private void addDrawnTuplets ()
     {
         final int margin = sheet.getInterline() / 2;
+
+        // A tuplet sign read on a fingering digit the PDF draws is that digit
+        for (Inter tuplet : system.getSig().inters(TupletInter.class)) {
+            if (VectorChecker.isOnFingering(tuplet)) {
+                logger.debug("{} is a fingering", tuplet);
+                tuplet.remove();
+            }
+        }
 
         for (Map.Entry<Glyph, VectorSymbols.Kind> entry : VectorChecker.drawnTuplets(system)
                 .entrySet()) {

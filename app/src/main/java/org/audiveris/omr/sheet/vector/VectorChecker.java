@@ -183,6 +183,37 @@ public abstract class VectorChecker
                 nRemoved);
     }
 
+    //--------------//
+    // isOnFingering //
+    //--------------//
+    /**
+     * Tell whether the PDF draws a fingering digit at the center of a recognized symbol, and
+     * no tuplet number: LilyPond writes its tuplet numbers in italics, and its fingerings
+     * with digits of its own.
+     *
+     * @param inter the recognized symbol
+     * @return false if the page is not read from a vector PDF or draws no fingering there
+     */
+    public static boolean isOnFingering (Inter inter)
+    {
+        final VectorSymbols vectorSymbols = VectorSymbols.of(inter.getSig().getSystem()
+                .getSheet());
+
+        if (vectorSymbols.isEmpty()) {
+            return false;
+        }
+
+        final Point center = inter.getCenter();
+        final Rectangle2D spot = new Rectangle2D.Double(center.x - 1, center.y - 1, 3, 3);
+
+        if (!vectorSymbols.intersected(Category.TUPLET, inter.getBounds()).isEmpty()) {
+            return false;
+        }
+
+        return isOnDigit(vectorSymbols, inter) && !vectorSymbols.intersected(Category.TIME, spot)
+                .isEmpty();
+    }
+
     //-----------//
     // isOnDigit //
     //-----------//
