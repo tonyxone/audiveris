@@ -46,6 +46,7 @@ import org.audiveris.omr.sig.inter.PedalInter;
 import org.audiveris.omr.sig.inter.SentenceInter;
 import org.audiveris.omr.sig.inter.SlurInter;
 import org.audiveris.omr.sig.inter.SmallChordInter;
+import org.audiveris.omr.sig.inter.StemInter;
 import org.audiveris.omr.sig.inter.WedgeInter;
 import org.audiveris.omr.sig.relation.ChordGraceRelation;
 import org.audiveris.omr.sig.relation.Link;
@@ -383,14 +384,36 @@ public class SymbolsLinker
         KeyInter.lookupCandidates(system);
     }
 
+    //--------------//
+    // overlapsHead //
+    //--------------//
+    /**
+     * Whether a box touches a note head or a stem: an alter linked to its own head would beat
+     * that other head or stem in their exclusion, however small their overlap, and a note
+     * would be lost.
+     */
+    private static boolean overlapsHead (Rectangle box,
+                                         List<Inter> heads)
+    {
+        for (Inter head : heads) {
+            if (box.intersects(head.getBounds())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     //-----------------//
     // addMissedAlters //
     //-----------------//
     /**
      * Add the naturals, sharps and flats a vector PDF draws where the image analysis found
      * no alter: the naturals of a key change, after a barline and before a new time signature,
-     * can get lost with them, and the notes keep the old key.
-     * Those that make no key are removed later as abnormal, as any alter not tied to a head.
+     * can get lost with them, and the notes keep the old key; the accidental of a note, close
+     * to its head or to another accidental, can be missed too, and the note sounds the key.
+     * Each is linked to its head, if any. Those that make no key and have no head are removed
+     * later as abnormal.
      */
     private void addMissedAlters ()
     {
@@ -400,11 +423,15 @@ public class SymbolsLinker
             known.add(inter.getBounds());
         }
 
+        // Heads and stems an added alter must not touch
+        final List<Inter> heads = sig.inters(HeadInter.class);
+        heads.addAll(sig.inters(StemInter.class));
+
         for (Shape shape : new Shape[] { Shape.NATURAL, Shape.SHARP, Shape.FLAT }) {
             for (Glyph glyph : VectorChecker.missedGlyphs(system, shape, known)) {
                 final Staff staff = system.getClosestStaff(glyph.getCenter2D());
 
-                if (staff == null) {
+                if ((staff == null) || overlapsHead(glyph.getBounds(), heads)) {
                     continue;
                 }
 
@@ -415,6 +442,11 @@ public class SymbolsLinker
                         staff);
                 sig.addVertex(alter);
                 known.add(alter.getBounds());
+
+                for (Link link : alter.searchLinks(system)) {
+                    link.applyTo(alter);
+                }
+
                 logger.debug("{} read from the PDF", alter);
             }
         }
