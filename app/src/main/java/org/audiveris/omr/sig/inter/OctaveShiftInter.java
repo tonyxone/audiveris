@@ -24,6 +24,7 @@ package org.audiveris.omr.sig.inter;
 import org.audiveris.omr.constant.Constant;
 import org.audiveris.omr.constant.ConstantSet;
 import org.audiveris.omr.glyph.Glyph;
+import org.audiveris.omr.glyph.GlyphFactory;
 import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.math.PointUtil;
 import org.audiveris.omr.sheet.Part;
@@ -133,6 +134,10 @@ public class OctaveShiftInter
     /** A word that is the value of an octave sign. */
     private static final Pattern OCTAVE_WORD = Pattern.compile(
             "\\(?(8|15|22)(va|vb|ma|mb|ba)?\\)?");
+
+    /** A word that the text recognition made of an octave value and the dashes of its line. */
+    private static final Pattern DASHED_OCTAVE_WORD = Pattern.compile(
+            "\\(?(8|15|22)(va|vb|ma|mb|ba)?\\)?['\"`\u2018\u2019\u201C\u201D.,_~\\-\u2013\u2014]{3,}.*");
 
     /** For comparing interpretations by increasing staff id. */
     public static final Comparator<Inter> byStaffId = (Inter i1,
@@ -954,13 +959,25 @@ public class OctaveShiftInter
 
         for (Inter inter : system.getSig().inters(WordInter.class)) {
             final WordInter word = (WordInter) inter;
-            final Matcher matcher = OCTAVE_WORD.matcher(word.getValue());
-            final Glyph glyph = word.getGlyph();
             final InterEnsemble sentence = word.getEnsemble();
+            Matcher matcher = OCTAVE_WORD.matcher(word.getValue());
+            Glyph glyph = word.getGlyph();
 
-            if (!matcher.matches() || (glyph == null) || ((sentence != null) && (sentence
-                    .getMembers().size() > 1))) {
+            if (glyph == null) {
                 continue;
+            }
+
+            if (matcher.matches()) {
+                if ((sentence != null) && (sentence.getMembers().size() > 1)) {
+                    continue;
+                }
+            } else {
+                // The value may come with the dashes of its line, and with what lies beyond
+                matcher = DASHED_OCTAVE_WORD.matcher(word.getValue());
+
+                if (!matcher.matches() || ((glyph = leadingPiece(glyph, word.getValue(), sheet)) == null)) {
+                    continue;
+                }
             }
 
             final Staff staff = getOwnerStaff(glyph, sheet);
@@ -991,6 +1008,63 @@ public class OctaveShiftInter
                 system.getSig().addVertex(os);
             }
         }
+    }
+
+    //--------------//
+    // leadingPiece //
+    //--------------//
+    /**
+     * Report the first piece of a word glyph, past an opening parenthesis, if it has the size
+     * of an octave value.
+     *
+     * @param glyph the word glyph
+     * @param value the word value
+     * @param sheet the containing sheet
+     * @return the registered glyph of the value, or null
+     */
+    private static Glyph leadingPiece (Glyph glyph,
+                                       String value,
+                                       Sheet sheet)
+    {
+        final int interline = sheet.getScale().getInterline();
+        final List<Glyph> pieces = GlyphFactory.buildGlyphs(
+                glyph.getRunTable(),
+                glyph.getTopLeft());
+        Collections.sort(pieces, Comparator.comparingInt(Glyph::getLeft));
+
+        // A parenthesis may come in thin fragments
+        final boolean paren = value.startsWith("(");
+        int index = 0;
+
+        while (paren && (index < pieces.size()) && (pieces.get(index).getWidth() < (constants
+                .maxParenWidth.getValue() * interline))) {
+            index++;
+        }
+
+        final Glyph first = (pieces.size() > index) ? pieces.get(index) : null;
+
+        if ((first == null) || (first.getHeight() < (constants.minValueHeight.getValue()
+                * interline)) || (first.getWidth() > (constants.maxValueWidth.getValue()
+                        * interline))) {
+            return null;
+        }
+
+        if (!paren) {
+            return sheet.getGlyphIndex().registerOriginal(first);
+        }
+
+        // Within parentheses, the line starts after the closing one
+        final int maxX = first.getLeft() + first.getWidth() + (int) Math.round(constants
+                .maxParenWidth.getValue() * interline);
+        final List<Glyph> parts = new ArrayList<>();
+
+        for (Glyph piece : pieces) {
+            if (piece.getLeft() <= maxX) {
+                parts.add(piece);
+            }
+        }
+
+        return sheet.getGlyphIndex().registerOriginal(GlyphFactory.buildGlyph(parts));
     }
 
     //---------------//
@@ -1384,6 +1458,18 @@ public class OctaveShiftInter
         private final Constant.Ratio maxUpperStaffRatio = new Constant.Ratio(
                 0.3,
                 "Ratio of gaps to the staves around a sign below which it applies to the upper one");
+
+        private final Constant.Ratio minValueHeight = new Constant.Ratio(
+                0.5,
+                "Minimum height, in interlines, of an octave value read within a longer word");
+
+        private final Constant.Ratio maxParenWidth = new Constant.Ratio(
+                0.4,
+                "Maximum width, in interlines, of a parenthesis around an octave value");
+
+        private final Constant.Ratio maxValueWidth = new Constant.Ratio(
+                1.5,
+                "Maximum width, in interlines, of an octave value read within a longer word");
 
         private final Constant.Ratio minLineShare = new Constant.Ratio(
                 0.6,
