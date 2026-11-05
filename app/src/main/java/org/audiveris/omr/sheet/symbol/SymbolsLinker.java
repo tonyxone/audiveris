@@ -424,9 +424,11 @@ public class SymbolsLinker
             known.add(inter.getBounds());
         }
 
-        // Heads and stems an added alter must not touch
+        // Heads and stems an added alter must not touch: a stem left with no head, as one read
+        // on the alter itself, does not count
         final List<Inter> heads = sig.inters(HeadInter.class);
-        heads.addAll(sig.inters(StemInter.class));
+        heads.addAll(sig.inters(StemInter.class).stream().filter(
+                stem -> !((StemInter) stem).getHeads().isEmpty()).toList());
 
         for (Shape shape : new Shape[] {
                 Shape.NATURAL,
