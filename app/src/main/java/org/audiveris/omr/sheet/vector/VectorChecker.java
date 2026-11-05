@@ -53,6 +53,7 @@ import ij.process.ByteProcessor;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.geom.Rectangle2D;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -285,6 +286,77 @@ public abstract class VectorChecker
                 }
                 default -> {}
             }
+        }
+
+        return null;
+    }
+
+    //-----------//
+    // drawnFlag //
+    //-----------//
+    /**
+     * Report the flag the PDF draws over a glyph: a flag of a regular note whose bounds mostly
+     * match those of the glyph, with a glyph of the black pixels within the drawn flag.
+     * <p>
+     * The classifier may score a plain flag too low to keep it, as for the dotted eighths of
+     * Bach's first prelude of the Well-Tempered Clavier, whose glyph also takes the dot in: the
+     * flag is then made of its own pixels, so as not to overlap the dot.
+     *
+     * @param glyph  the glyph
+     * @param system the containing system
+     * @return the flag shape with its glyph, or null if the PDF draws no such flag there
+     */
+    public static Map.Entry<Shape, Glyph> drawnFlag (Glyph glyph,
+                                                     SystemInfo system)
+    {
+        final Sheet sheet = system.getSheet();
+        final VectorSymbols vectorSymbols = VectorSymbols.of(sheet);
+
+        if (vectorSymbols.isEmpty()) {
+            return null;
+        }
+
+        final Rectangle box = glyph.getBounds();
+        final double minHeight = system.getSheet().getScale().toPixelsDouble(
+                constants.minFlagHeight);
+
+        // Flags of small notes are drawn smaller: they are left alone
+        for (Symbol symbol : vectorSymbols.intersected(Category.FLAG, box)) {
+            if ((symbol.bounds().getHeight() < minHeight) || !overlapsMost(symbol.bounds(), box)) {
+                continue;
+            }
+
+            final Shape shape = switch (symbol.kind()) {
+                case FLAG_1_UP -> Shape.FLAG_1;
+                case FLAG_1_DOWN -> Shape.FLAG_1_DOWN;
+                case FLAG_2_UP -> Shape.FLAG_2;
+                case FLAG_2_DOWN -> Shape.FLAG_2_DOWN;
+                case FLAG_3_UP -> Shape.FLAG_3;
+                case FLAG_3_DOWN -> Shape.FLAG_3_DOWN;
+                case FLAG_4_UP -> Shape.FLAG_4;
+                case FLAG_4_DOWN -> Shape.FLAG_4_DOWN;
+                default -> null;
+            };
+
+            final ByteProcessor binary = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
+            final Rectangle roi = symbol.bounds().getBounds().intersection(box);
+
+            if ((shape == null) || roi.isEmpty()) {
+                continue;
+            }
+
+            final Point offset = new Point();
+            final RunTable table = new RunTableFactory(VERTICAL).createTable(binary, roi).trim(
+                    offset);
+
+            if (table.getWeight() == 0) {
+                continue;
+            }
+
+            final Glyph flag = sheet.getGlyphIndex().registerOriginal(
+                    new Glyph(roi.x + offset.x, roi.y + offset.y, table));
+
+            return new AbstractMap.SimpleEntry<>(shape, flag);
         }
 
         return null;
@@ -623,6 +695,10 @@ public abstract class VectorChecker
         private final Constant.Ratio minClefOverlap = new Constant.Ratio(
                 0.5,
                 "Minimum ratio of common area to union area between a glyph and a drawn symbol");
+
+        private final Scale.Fraction minFlagHeight = new Scale.Fraction(
+                2.0,
+                "Minimum height of a flag drawn by the PDF, below which it is a small note's");
 
         private final Scale.Fraction minTimeDigitHeight = new Scale.Fraction(
                 1.5,
