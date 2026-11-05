@@ -214,6 +214,32 @@ public abstract class VectorChecker
                 .isEmpty();
     }
 
+    //----------------//
+    // isOnAccidental //
+    //----------------//
+    /**
+     * Tell whether the center of a recognized symbol lies within an accidental the PDF
+     * draws, and on no note head.
+     */
+    private static boolean isOnAccidental (VectorSymbols vectorSymbols,
+                                           Inter inter)
+    {
+        final Point center = inter.getCenter();
+        final Rectangle2D spot = new Rectangle2D.Double(center.x, center.y, 1, 1);
+
+        if (!vectorSymbols.intersected(Category.HEAD, spot).isEmpty()) {
+            return false;
+        }
+
+        for (Symbol symbol : vectorSymbols.intersected(Category.ACCIDENTAL, spot)) {
+            if (symbol.bounds().contains(center.x, center.y)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     //-----------//
     // isOnDigit //
     //-----------//
@@ -696,11 +722,28 @@ public abstract class VectorChecker
     //--------------//
     /**
      * Check the clefs, accidentals, dots and rests of a system against the PDF.
+     * Small heads read on an accidental the PDF draws, such as the halves of a sharp, go first:
+     * they came after the heads were checked.
      *
      * @param system the system to process
      */
     public static void checkSymbols (SystemInfo system)
     {
+        final VectorSymbols vectorSymbols = VectorSymbols.of(system.getSheet());
+
+        if (!vectorSymbols.isEmpty()) {
+            for (Inter inter : system.getSig().inters(HeadInter.class)) {
+                if ((inter.getShape() != null) && inter.getShape().isSmallHead()
+                        && isOnAccidental(vectorSymbols, inter)) {
+                    if (inter.isVip()) {
+                        logger.info("VIP {} is a piece of an accidental", inter);
+                    }
+
+                    inter.remove();
+                }
+            }
+        }
+
         final List<Inter> inters = new ArrayList<>();
         inters.addAll(system.getSig().inters(ClefInter.class));
         inters.addAll(system.getSig().inters(AlterInter.class));
