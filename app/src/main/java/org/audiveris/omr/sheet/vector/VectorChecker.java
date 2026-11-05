@@ -127,6 +127,17 @@ public abstract class VectorChecker
             }
 
             final boolean same = isDrawn(vectorSymbols, inter, kind, margin);
+
+            // A dot on a digit the PDF draws is a piece of a fingering: whatever the trust in
+            // dots, it goes
+            if (!same && (kind.category == Category.DOT) && isOnDigit(vectorSymbols, inter)) {
+                if (inter.isVip()) {
+                    logger.info("VIP {} is a piece of a digit", inter);
+                }
+
+                inter.remove();
+                continue;
+            }
             final Map<Category, List<Inter>> verdict = same ? confirmed
                     : ((kind.category == Category.DOT)
                             && isConfused(vectorSymbols, inter, kind, margin)) ? confused
@@ -170,6 +181,27 @@ public abstract class VectorChecker
 
         logger.debug("S#{} vector check: {} confirmed, {} removed", system.getId(), nConfirmed,
                 nRemoved);
+    }
+
+    //-----------//
+    // isOnDigit //
+    //-----------//
+    /**
+     * Tell whether the center of a recognized symbol lies within a digit the PDF draws.
+     */
+    private static boolean isOnDigit (VectorSymbols vectorSymbols,
+                                      Inter inter)
+    {
+        final Point center = inter.getCenter();
+        final Rectangle2D spot = new Rectangle2D.Double(center.x, center.y, 1, 1);
+
+        for (Symbol symbol : vectorSymbols.intersected(Category.TIME, spot)) {
+            if (symbol.bounds().contains(center.x, center.y)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     //---------//

@@ -437,12 +437,22 @@ public class VectorSymbols
     private static Kind emmentalerKind (PDFont font,
                                         int code)
     {
-        if (!isEmmentaler(font) || !(font instanceof PDSimpleFont simple)
-                || (simple.getEncoding() == null)) {
+        if (!(font instanceof PDSimpleFont simple) || (simple.getEncoding() == null)) {
             return null;
         }
 
-        return EMMENTALER.get(simple.getEncoding().getName(code));
+        if (isEmmentaler(font)) {
+            return EMMENTALER.get(simple.getEncoding().getName(code));
+        }
+
+        // LilyPond writes its fingerings with the digits of its feta-alphabet font
+        if ((font.getName() != null) && font.getName().contains("feta-alphabet")) {
+            final Kind kind = EMMENTALER.get(simple.getEncoding().getName(code));
+
+            return ((kind != null) && (kind.category == Category.TIME)) ? kind : null;
+        }
+
+        return null;
     }
 
     //--------------//
@@ -628,11 +638,9 @@ public class VectorSymbols
             Kind kind = emmentalerKind(font, code);
             Character c = null;
 
-            if (isEmmentaler(font)) {
-                if ((kind != null) && (kind.category == Category.TIME)) {
-                    c = (char) ('0' + kind.digit());
-                }
-            } else {
+            if ((kind != null) && (kind.category == Category.TIME)) {
+                c = (char) ('0' + kind.digit());
+            } else if (!isEmmentaler(font)) {
                 final String unicode = font.toUnicode(code);
 
                 if ((unicode != null) && (unicode.length() == 1)) {
