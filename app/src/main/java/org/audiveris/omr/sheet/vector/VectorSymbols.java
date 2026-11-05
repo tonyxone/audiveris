@@ -132,6 +132,15 @@ public class VectorSymbols
         emmentaler(Kind.REST_32ND, "rests.5");
         emmentaler(Kind.REST_64TH, "rests.6");
 
+        final String[] digits = {
+                "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"};
+
+        for (int d = 0; d <= 9; d++) {
+            final Kind kind = Kind.values()[Kind.TIME_0.ordinal() + d];
+            emmentaler(kind, digits[d]);
+            smufl(kind, 0xE080 + d);
+        }
+
         smufl(Kind.HEAD_BREVE, 0xE0A0, 0xE0A1);
         smufl(Kind.HEAD_WHOLE, 0xE0A2);
         smufl(Kind.HEAD_VOID, 0xE0A3);
@@ -198,7 +207,8 @@ public class VectorSymbols
         CLEF,
         ACCIDENTAL,
         DOT,
-        REST;
+        REST,
+        TIME;
     }
 
     /** The symbols we read. */
@@ -224,13 +234,29 @@ public class VectorSymbols
         REST_8TH(Category.REST),
         REST_16TH(Category.REST),
         REST_32ND(Category.REST),
-        REST_64TH(Category.REST);
+        REST_64TH(Category.REST),
+        TIME_0(Category.TIME),
+        TIME_1(Category.TIME),
+        TIME_2(Category.TIME),
+        TIME_3(Category.TIME),
+        TIME_4(Category.TIME),
+        TIME_5(Category.TIME),
+        TIME_6(Category.TIME),
+        TIME_7(Category.TIME),
+        TIME_8(Category.TIME),
+        TIME_9(Category.TIME);
 
         public final Category category;
 
         Kind (Category category)
         {
             this.category = category;
+        }
+
+        /** The value of a time digit. */
+        public int digit ()
+        {
+            return ordinal() - TIME_0.ordinal();
         }
     }
 

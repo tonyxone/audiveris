@@ -33,6 +33,7 @@ import org.audiveris.omr.glyph.GlyphLink;
 import org.audiveris.omr.glyph.Glyphs;
 import org.audiveris.omr.glyph.Grades;
 import org.audiveris.omr.glyph.Shape;
+import org.audiveris.omr.glyph.ShapeSet;
 import org.audiveris.omr.math.GeoUtil;
 import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
@@ -207,12 +208,28 @@ public class SymbolsBuilder
             return;
         }
 
-        final Evaluation[] evals = classifier.evaluate(
+        Evaluation[] evals = classifier.evaluate(
                 glyph,
                 system,
                 constants.maxEvaluationCount.getValue(),
                 Grades.symbolMinGrade,
                 EnumSet.of(Classifier.Condition.CHECKED));
+
+        // A time signature the PDF draws there replaces any the classifier proposes
+        final Shape drawnTime = VectorChecker.drawnTime(glyph, system);
+
+        if (drawnTime != null) {
+            final List<Evaluation> kept = new ArrayList<>();
+
+            for (Evaluation eval : evals) {
+                if (!ShapeSet.WholeTimes.contains(eval.shape)) {
+                    kept.add(eval);
+                }
+            }
+
+            kept.add(0, new Evaluation(drawnTime, constants.drawnTimeGrade.getValue()));
+            evals = kept.toArray(Evaluation[]::new);
+        }
 
         // Create one interpretation for each acceptable evaluation
         final SIGraph sig = system.getSig();
@@ -518,6 +535,10 @@ public class SymbolsBuilder
         private final Scale.Fraction maxClefChangeMargin = new Scale.Fraction(
                 1.5,
                 "Maximum extent of a small treble clef above or below its staff");
+
+        private final Constant.Ratio drawnTimeGrade = new Constant.Ratio(
+                0.9,
+                "Grade given to a time signature that the PDF draws");
 
         private final Constant.Ratio clefChangeGrade = new Constant.Ratio(
                 0.8,

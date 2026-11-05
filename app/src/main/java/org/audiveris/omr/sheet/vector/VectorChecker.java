@@ -56,6 +56,7 @@ import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -270,18 +271,7 @@ public abstract class VectorChecker
         final Rectangle box = glyph.getBounds();
 
         for (Symbol symbol : vectorSymbols.intersected(Category.CLEF, box)) {
-            final Rectangle2D drawn = symbol.bounds();
-            final Rectangle2D common = drawn.createIntersection(box);
-
-            if (common.isEmpty()) {
-                continue;
-            }
-
-            final double inter = common.getWidth() * common.getHeight();
-            final double union = (drawn.getWidth() * drawn.getHeight())
-                    + (box.getWidth() * box.getHeight()) - inter;
-
-            if (inter < (constants.minClefOverlap.getValue() * union)) {
+            if (!overlapsMost(symbol.bounds(), box)) {
                 continue;
             }
 
@@ -297,6 +287,99 @@ public abstract class VectorChecker
         }
 
         return null;
+    }
+
+    //-----------//
+    // drawnTime //
+    //-----------//
+    /**
+     * Report the time signature the PDF draws over a glyph: digits of a time signature size,
+     * a numerator above a denominator, whose bounds together mostly match those of the glyph.
+     * <p>
+     * The classifier may take one time signature for another of the same look, such as 6/4 for
+     * 3/4 in the Emmentaler font of LilyPond.
+     *
+     * @param glyph  the glyph
+     * @param system the containing system
+     * @return the shape of a predefined time signature, or null
+     */
+    public static Shape drawnTime (Glyph glyph,
+                                   SystemInfo system)
+    {
+        final VectorSymbols vectorSymbols = VectorSymbols.of(system.getSheet());
+
+        if (vectorSymbols.isEmpty()) {
+            return null;
+        }
+
+        final Rectangle box = glyph.getBounds();
+        final double minHeight = system.getSheet().getScale().toPixelsDouble(
+                constants.minTimeDigitHeight);
+        final List<Symbol> digits = new ArrayList<>();
+        Rectangle2D drawn = null;
+
+        // Fingerings use the same digits, smaller
+        for (Symbol symbol : vectorSymbols.intersected(Category.TIME, box)) {
+            if (symbol.bounds().getHeight() >= minHeight) {
+                digits.add(symbol);
+                drawn = (drawn == null) ? (Rectangle2D) symbol.bounds().clone()
+                        : drawn.createUnion(symbol.bounds());
+            }
+        }
+
+        if ((drawn == null) || !overlapsMost(drawn, box)) {
+            return null;
+        }
+
+        // Numerator digits above the middle, denominator digits below, each read left to right
+        final double midY = drawn.getCenterY();
+        digits.sort(Comparator.comparingDouble(d -> d.bounds().getX()));
+
+        int num = 0;
+        int den = 0;
+
+        for (Symbol digit : digits) {
+            if (digit.bounds().getCenterY() < midY) {
+                num = (10 * num) + digit.kind().digit();
+            } else {
+                den = (10 * den) + digit.kind().digit();
+            }
+        }
+
+        return switch ((num * 100) + den) {
+            case 404 -> Shape.TIME_FOUR_FOUR;
+            case 202 -> Shape.TIME_TWO_TWO;
+            case 204 -> Shape.TIME_TWO_FOUR;
+            case 304 -> Shape.TIME_THREE_FOUR;
+            case 504 -> Shape.TIME_FIVE_FOUR;
+            case 604 -> Shape.TIME_SIX_FOUR;
+            case 308 -> Shape.TIME_THREE_EIGHT;
+            case 608 -> Shape.TIME_SIX_EIGHT;
+            case 1208 -> Shape.TIME_TWELVE_EIGHT;
+            default -> null;
+        };
+    }
+
+    //--------------//
+    // overlapsMost //
+    //--------------//
+    /**
+     * Whether two boxes share most of their union.
+     */
+    private static boolean overlapsMost (Rectangle2D drawn,
+                                         Rectangle2D box)
+    {
+        final Rectangle2D common = drawn.createIntersection(box);
+
+        if (common.isEmpty()) {
+            return false;
+        }
+
+        final double inter = common.getWidth() * common.getHeight();
+        final double union = (drawn.getWidth() * drawn.getHeight())
+                + (box.getWidth() * box.getHeight()) - inter;
+
+        return inter >= (constants.minClefOverlap.getValue() * union);
     }
 
     //--------------//
@@ -489,7 +572,11 @@ public abstract class VectorChecker
 
         private final Constant.Ratio minClefOverlap = new Constant.Ratio(
                 0.5,
-                "Minimum ratio of common area to union area between a glyph and a drawn clef");
+                "Minimum ratio of common area to union area between a glyph and a drawn symbol");
+
+        private final Scale.Fraction minTimeDigitHeight = new Scale.Fraction(
+                1.5,
+                "Minimum height of a time signature digit drawn by the PDF");
 
         private final Constant.Ratio minAgreement = new Constant.Ratio(
                 0.7,
