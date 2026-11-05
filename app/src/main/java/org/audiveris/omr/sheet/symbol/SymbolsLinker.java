@@ -39,6 +39,7 @@ import org.audiveris.omr.sig.inter.FermataInter;
 import org.audiveris.omr.sig.inter.HeadChordInter;
 import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
+import org.audiveris.omr.sig.inter.KeyAlterInter;
 import org.audiveris.omr.sig.inter.KeyInter;
 import org.audiveris.omr.sig.inter.NumberInter;
 import org.audiveris.omr.sig.inter.OctaveShiftInter;
@@ -48,6 +49,7 @@ import org.audiveris.omr.sig.inter.SlurInter;
 import org.audiveris.omr.sig.inter.SmallChordInter;
 import org.audiveris.omr.sig.inter.StemInter;
 import org.audiveris.omr.sig.inter.WedgeInter;
+import org.audiveris.omr.sig.relation.AlterHeadRelation;
 import org.audiveris.omr.sig.relation.ChordGraceRelation;
 import org.audiveris.omr.sig.relation.Link;
 import org.audiveris.omr.sig.relation.NoExclusion;
@@ -486,6 +488,18 @@ public class SymbolsLinker
                 }
 
                 logger.debug("{} read from the PDF", alter);
+            }
+        }
+
+        // The farthest accidentals of a chord with many make columns too far from its heads
+        final List<Inter> alters = sig.inters(AlterInter.class);
+
+        for (Inter inter : alters) {
+            if (!(inter instanceof KeyAlterInter) && !sig.hasRelation(inter, AlterHeadRelation.class)
+                    && VectorChecker.isDrawn(inter)) {
+                for (Link link : ((AlterInter) inter).searchLinksPast(system, alters)) {
+                    link.applyTo(inter);
+                }
             }
         }
     }
