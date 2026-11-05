@@ -216,6 +216,15 @@ public class EndingsBuilder
             return null;
         }
 
+        // An ending line is straight: a slur may have its two ends level, but it bends between
+        final double bend = segment.getBounds().height - Math.abs(rightEnd.y - leftEnd.y);
+
+        if (bend > params.maxBend) {
+            logger.debug("Ending {} bends too much", segment);
+
+            return null;
+        }
+
         // Consider the staff just below the segment
         final Staff staff = system.getStaffAtOrBelow(leftEnd);
 
@@ -270,8 +279,33 @@ public class EndingsBuilder
         final int rightStaffY = staff.getFirstLine().yAt(rightPt.x);
         final Filament rightLeg = lookupLeg(seg, rightPt, rightStaffY, system);
 
+        // An ending starts with its left leg down toward the staff: a pedal line, a hairpin or
+        // the line of an octave sign has none. Only an ending continued from the previous line
+        // starts without, just after the staff header, and it then ends with its right leg.
+        if (leftLeg == null) {
+            final boolean continued = (rightLeg != null)
+                    && (leftPt.x <= (staff.getHeaderStop() + params.maxHeaderGap));
+
+            if (!continued) {
+                logger.debug("Ending {} has no left leg", segment);
+
+                return null;
+            }
+        }
+
         // Middle legs if any (each would split segment line into separate endings)
         final List<Filament> middleLegs = getMiddleLegs(segment, staff);
+
+        // Each middle leg hangs from the line: a slur between level ends meets bars far above it
+        for (Filament leg : middleLegs) {
+            final Point2D top = leg.getStartPoint();
+
+            if (Math.abs(top.getY() - LineUtil.yAtX(line, top.getX())) > params.maxBend) {
+                logger.debug("Ending {} does not meet its middle leg {}", segment, leg);
+
+                return null;
+            }
+        }
 
         if (middleLegs.isEmpty()) {
             final EndingInter endingInter = createInter(
@@ -506,6 +540,14 @@ public class EndingsBuilder
         private final Constant.Ratio minFirstMeasureRatio = new Constant.Ratio(
                 0.6,
                 "Minimum ending length as ratio of related measure length, for first in system");
+
+        private final Scale.Fraction maxBend = new Scale.Fraction(
+                0.5,
+                "Maximum height of an ending line beyond its slope, where a slur bends");
+
+        private final Scale.Fraction maxHeaderGap = new Scale.Fraction(
+                2.0,
+                "Maximum gap from staff header to the start of an ending continued on a new line");
     }
 
     //------------//
@@ -519,11 +561,17 @@ public class EndingsBuilder
     {
         final int maxBarShift;
 
+        final int maxBend;
+
+        final int maxHeaderGap;
+
         Parameters (Scale scale)
         {
             super(scale);
 
             maxBarShift = scale.toPixels(EndingBarRelation.getXGapMaximum(Profiles.STRICT));
+            maxBend = scale.toPixels(constants.maxBend);
+            maxHeaderGap = scale.toPixels(constants.maxHeaderGap);
         }
     }
 }
