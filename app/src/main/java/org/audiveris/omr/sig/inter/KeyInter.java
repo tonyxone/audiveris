@@ -1134,7 +1134,11 @@ public class KeyInter
                         false,
                         staffAlters.subList(i, staffAlters.size()));
 
-                if (keyConfig != null) {
+                if ((keyConfig != null) && (Math.abs(keyConfig.fifths) == 1) && followsHead(
+                        staffAlters.get(i),
+                        staff)) {
+                    logger.debug("Sign after a head in its bar is no key: {}", staffAlters.get(i));
+                } else if (keyConfig != null) {
                     final List<AlterInter> members = staffAlters.subList(
                             i,
                             i + Math.abs(keyConfig.fifths));
@@ -1143,6 +1147,45 @@ public class KeyInter
                 }
             }
         }
+    }
+
+    //-------------//
+    // followsHead //
+    //-------------//
+    /**
+     * Tell whether a note head of the staff stands before the sign in the same bar.
+     * <p>
+     * A key change starts a bar: a lone sign that comes after notes is the accidental of a chord,
+     * and taken for a key, it would alter all the notes that follow.
+     *
+     * @param alter the sign to check
+     * @param staff the containing staff
+     * @return true if so
+     */
+    private static boolean followsHead (AlterInter alter,
+                                        Staff staff)
+    {
+        final SystemInfo system = staff.getSystem();
+        final Point center = alter.getCenter();
+        final MeasureStack stack = system.getStackAt(center);
+
+        if (stack == null) {
+            return false;
+        }
+
+        final int left = stack.getLeft();
+
+        for (Inter head : system.getSig().inters(HeadInter.class)) {
+            if (head.getStaff() == staff) {
+                final int x = head.getCenter().x;
+
+                if ((x >= left) && (x < center.x)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     //--------------------//
