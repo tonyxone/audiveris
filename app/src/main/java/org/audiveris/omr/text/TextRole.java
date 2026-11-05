@@ -42,6 +42,7 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.geom.Point2D;
 import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Class <code>TextRole</code> describes the role of a piece of text (typically a sentence).
@@ -86,6 +87,13 @@ public enum TextRole
     private static final Constants constants = new Constants();
 
     private static final Logger logger = LoggerFactory.getLogger(TextRole.class);
+
+    /** A da capo, alone or after a section name, perhaps "al Fine". */
+    private static final Pattern DA_CAPO = Pattern.compile(
+            "(?i)(^|\\s)(D\\.\\s?C\\.?|da\\s+capo)(\\s|$)");
+
+    /** A lone fine. */
+    private static final Pattern FINE = Pattern.compile("(?i)\\s*fine\\.?\\s*");
 
     //~ Methods ------------------------------------------------------------------------------------
 
@@ -140,6 +148,11 @@ public enum TextRole
         }
 
         final Point2D boxCenter = GeoUtil.center2D(box);
+
+        // A da capo or a fine is a direction, wherever it stands
+        if (isNavigation(line.getValue())) {
+            return Direction;
+        }
 
         // Is line made entirely of potential chord symbols?
         boolean isAllChords = line.isAllChordNames();
@@ -303,6 +316,44 @@ public enum TextRole
 
         // Default
         return UnknownRole;
+    }
+
+    //--------------//
+    // isNavigation //
+    //--------------//
+    /**
+     * Tell whether a text sends the playing back to the start, or ends it: "D.C.", "Da capo",
+     * "Menuetto D.C.", "D.C. al Fine", or a lone "Fine".
+     *
+     * @param value the text value
+     * @return true if so
+     */
+    public static boolean isNavigation (String value)
+    {
+        return (value != null) && (DA_CAPO.matcher(value).find() || FINE.matcher(value)
+                .matches());
+    }
+
+    /**
+     * Tell whether a text sends the playing back to the start.
+     *
+     * @param value the text value
+     * @return true if so
+     */
+    public static boolean isDaCapo (String value)
+    {
+        return (value != null) && DA_CAPO.matcher(value).find();
+    }
+
+    /**
+     * Tell whether a text ends the playing after a da capo.
+     *
+     * @param value the text value
+     * @return true if so
+     */
+    public static boolean isFine (String value)
+    {
+        return (value != null) && FINE.matcher(value.trim()).matches();
     }
 
     //~ Inner Classes ------------------------------------------------------------------------------
