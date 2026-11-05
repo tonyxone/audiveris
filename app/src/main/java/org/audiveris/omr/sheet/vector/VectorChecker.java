@@ -244,6 +244,61 @@ public abstract class VectorChecker
         return false;
     }
 
+    //-----------------//
+    // drawnClefChange //
+    //-----------------//
+    /**
+     * Report the clef change the PDF draws over a glyph: a G or F clef whose bounds mostly
+     * match those of the glyph.
+     * <p>
+     * The image of a small clef within a staff is hard to recognize: its tail may get lost with
+     * the staff line, and the classifier take what remains for a time signature or a note.
+     *
+     * @param glyph  the glyph
+     * @param system the containing system
+     * @return G_CLEF_SMALL or F_CLEF_SMALL, or null if the PDF draws no such clef there
+     */
+    public static Shape drawnClefChange (Glyph glyph,
+                                         SystemInfo system)
+    {
+        final VectorSymbols vectorSymbols = VectorSymbols.of(system.getSheet());
+
+        if (vectorSymbols.isEmpty()) {
+            return null;
+        }
+
+        final Rectangle box = glyph.getBounds();
+
+        for (Symbol symbol : vectorSymbols.intersected(Category.CLEF, box)) {
+            final Rectangle2D drawn = symbol.bounds();
+            final Rectangle2D common = drawn.createIntersection(box);
+
+            if (common.isEmpty()) {
+                continue;
+            }
+
+            final double inter = common.getWidth() * common.getHeight();
+            final double union = (drawn.getWidth() * drawn.getHeight())
+                    + (box.getWidth() * box.getHeight()) - inter;
+
+            if (inter < (constants.minClefOverlap.getValue() * union)) {
+                continue;
+            }
+
+            switch (symbol.kind()) {
+                case CLEF_G -> {
+                    return Shape.G_CLEF_SMALL;
+                }
+                case CLEF_F -> {
+                    return Shape.F_CLEF_SMALL;
+                }
+                default -> {}
+            }
+        }
+
+        return null;
+    }
+
     //--------------//
     // missedGlyphs //
     //--------------//
@@ -431,6 +486,10 @@ public abstract class VectorChecker
         private final Scale.Fraction centerMargin = new Scale.Fraction(
                 0.2,
                 "Margin around a symbol center to find the drawn symbol");
+
+        private final Constant.Ratio minClefOverlap = new Constant.Ratio(
+                0.5,
+                "Minimum ratio of common area to union area between a glyph and a drawn clef");
 
         private final Constant.Ratio minAgreement = new Constant.Ratio(
                 0.7,

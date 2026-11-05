@@ -38,6 +38,7 @@ import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.SystemInfo;
+import org.audiveris.omr.sheet.vector.VectorChecker;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.ClefInter;
 import org.audiveris.omr.sig.inter.Inter;
@@ -217,10 +218,13 @@ public class SymbolsBuilder
         final SIGraph sig = system.getSig();
         final List<Inter> createdInters = new ArrayList<>();
 
-        if (isTrebleClefChange(glyph, closestStaff)) {
+        final Shape clefChange = isTrebleClefChange(glyph, closestStaff) ? Shape.G_CLEF_SMALL
+                : drawnClefChange(glyph, closestStaff, evals);
+
+        if (clefChange != null) {
             final Inter clef = ClefInter.createValid(
                     glyph,
-                    Shape.G_CLEF_SMALL,
+                    clefChange,
                     constants.clefChangeGrade.getValue(),
                     closestStaff);
 
@@ -246,6 +250,42 @@ public class SymbolsBuilder
                 logger.warn("Error in glyph evaluation " + ex, ex);
             }
         }
+    }
+
+    //-----------------//
+    // drawnClefChange //
+    //-----------------//
+    /**
+     * Report the clef change that the PDF draws over a glyph within a staff, past its header,
+     * if the classifier proposes no clef of this shape.
+     *
+     * @param glyph the glyph to check
+     * @param staff the closest staff
+     * @param evals the classifier evaluations of the glyph
+     * @return the clef shape, or null
+     */
+    private Shape drawnClefChange (Glyph glyph,
+                                   Staff staff,
+                                   Evaluation[] evals)
+    {
+        if (glyph.getLeft() <= staff.getHeaderStop()) {
+            return null;
+        }
+
+        final Shape shape = VectorChecker.drawnClefChange(glyph, system);
+
+        if (shape == null) {
+            return null;
+        }
+
+        for (Evaluation eval : evals) {
+            if ((eval.shape == shape) || (eval.shape == Shape.G_CLEF && shape == Shape.G_CLEF_SMALL)
+                    || (eval.shape == Shape.F_CLEF && shape == Shape.F_CLEF_SMALL)) {
+                return null;
+            }
+        }
+
+        return shape;
     }
 
     //--------------------//

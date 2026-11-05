@@ -303,6 +303,11 @@ public abstract class AbstractChordInter
 
                         if (count != 0) {
                             for (Relation dn : sig.getRelations(note, AugmentationRelation.class)) {
+                                // A dot removed with another note may have taken this relation
+                                if (!sig.containsEdge(dn)) {
+                                    continue;
+                                }
+
                                 Inter dot = sig.getOppositeInter(note, dn);
 
                                 if (!dot.isManual()) {
