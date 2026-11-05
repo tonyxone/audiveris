@@ -1221,6 +1221,12 @@ public class StackRhythm
                 if (group == null) {
                     continue;
                 }
+            } else if (group.size() == 2) {
+                group = tripletAfterRest(group, chords);
+
+                if (group == null) {
+                    continue;
+                }
             }
 
             if ((group.size() != 3) && (group.size() != 6)) {
@@ -1298,6 +1304,51 @@ public class StackRhythm
         }
 
         return triplets;
+    }
+
+    //------------------//
+    // tripletAfterRest //
+    //------------------//
+    /**
+     * A beamed pair of equal chords, right after a rest of their duration: the rest and the
+     * pair could make a triplet, as a rest and two eighths in a triplet beat of Beethoven's
+     * Pathetique. Eighths are beamed by the beat, so a plain pair that follows a rest would
+     * stand off it, with nothing to beam to.
+     *
+     * @param pair   the 2 chords of a beam group
+     * @param chords the standard chords of the measure
+     * @return the rest and the 2 chords, or null
+     */
+    private static List<AbstractChordInter> tripletAfterRest (List<AbstractChordInter> pair,
+                                                              Set<AbstractChordInter> chords)
+    {
+        final List<AbstractChordInter> sorted = new ArrayList<>(pair);
+        Collections.sort(sorted, Inters.byCenterAbscissa);
+
+        final AbstractChordInter first = sorted.get(0);
+        final Rational d = first.getDurationSansTuplet();
+        final int x = first.getCenter().x;
+        AbstractChordInter before = null;
+
+        // The closest chord before the pair in its staff
+        for (AbstractChordInter chord : chords) {
+            if ((chord.getTopStaff() == first.getTopStaff()) && !pair.contains(chord)) {
+                final int cx = chord.getCenter().x;
+
+                if ((cx < x) && ((before == null) || (cx > before.getCenter().x))) {
+                    before = chord;
+                }
+            }
+        }
+
+        if ((d == null) || (before == null) || !before.isRest() || !d.equals(
+                before.getDurationSansTuplet())) {
+            return null;
+        }
+
+        sorted.add(0, before);
+
+        return sorted;
     }
 
     //---------------//
