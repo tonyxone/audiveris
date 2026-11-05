@@ -56,6 +56,7 @@ import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.LyricItemInter;
 import org.audiveris.omr.sig.inter.SentenceInter;
+import org.audiveris.omr.sig.inter.SlurInter;
 import org.audiveris.omr.sig.inter.StemInter;
 import org.audiveris.omr.sig.inter.WordInter;
 import org.audiveris.omr.ui.BoardsPane;
@@ -241,9 +242,29 @@ public class SymbolsFilter
                 0.6,
                 "Minimum contextual grade to hide a head");
 
+        private final Constant.Ratio minSmallHeadGrade = new Constant.Ratio(
+                0.46,
+                "Minimum grade to hide a small head");
+
         private final Constant.Ratio minStemContextualGrade = new Constant.Ratio(
                 0.7,
                 "Minimum contextual grade to hide a stem");
+
+        private final Scale.Fraction maxClefCurlWidth = new Scale.Fraction(
+                2.0,
+                "Maximum width of a slur that can be the lower curl of a treble clef change");
+
+        private final Scale.Fraction minClefCurlHeight = new Scale.Fraction(
+                0.7,
+                "Minimum height of a slur that can be the lower curl of a treble clef change");
+
+        private final Scale.Fraction maxClefCurlPieceWidth = new Scale.Fraction(
+                1.2,
+                "Maximum width of a slur that can be a piece of a treble clef change curl");
+
+        private final Scale.Fraction minClefCurlPieceHeight = new Scale.Fraction(
+                0.4,
+                "Minimum height of a slur that can be a piece of a treble clef change curl");
     }
 
     //----------------//
@@ -351,32 +372,71 @@ public class SymbolsFilter
             return unboosted < constants.minHeadContextualGrade.getValue();
         }
 
-        //----------------//
-        // isWeakVoidHead //
-        //----------------//
+        //------------//
+        // isWeakHead //
+        //------------//
         /**
-         * Report whether the inter is a hollow head too weak to hide its pixels, or a chord
+         * Report whether the inter is a hollow or small head too weak to hide its pixels, or a chord
          * or stem holding only such heads.
          *
          * @param inter the inter to check
          * @return true for such a head, chord or stem
          */
-        private static boolean isWeakVoidHead (Inter inter)
+        private static boolean isWeakHead (Inter inter)
         {
             if (inter instanceof HeadChordInter chord) {
                 final List<? extends Inter> notes = chord.getNotes();
 
-                return !notes.isEmpty() && notes.stream().allMatch(SymbolsCleaner::isWeakVoidHead);
+                return !notes.isEmpty() && notes.stream().allMatch(SymbolsCleaner::isWeakHead);
             }
 
             if (inter instanceof StemInter stem) {
                 final Set<HeadInter> heads = stem.getHeads();
 
-                return !heads.isEmpty() && heads.stream().allMatch(SymbolsCleaner::isWeakVoidHead);
+                return !heads.isEmpty() && heads.stream().allMatch(SymbolsCleaner::isWeakHead);
             }
 
-            return (inter instanceof HeadInter) && (inter.getShape() == Shape.NOTEHEAD_VOID)
+            if (!(inter instanceof HeadInter)) {
+                return false;
+            }
+
+            // A stem lifts the contextual grade of a small head, so its own grade tells here
+            if ((inter.getShape() == Shape.NOTEHEAD_BLACK_SMALL)
+                    || (inter.getShape() == Shape.NOTEHEAD_VOID_SMALL)) {
+                return inter.getGrade() < constants.minSmallHeadGrade.getValue();
+            }
+
+            return (inter.getShape() == Shape.NOTEHEAD_VOID)
                     && (inter.getBestGrade() < constants.minHeadContextualGrade.getValue());
+        }
+
+        //------------//
+        // isClefCurl //
+        //------------//
+        /**
+         * Report whether the inter is a slur so short and so deep that it can be the lower curl
+         * of a treble clef change, or a piece of it, which erasing would leave too broken to be
+         * found.
+         *
+         * @param inter the inter to check
+         * @return true for such a slur
+         */
+        private boolean isClefCurl (Inter inter)
+        {
+            if (!(inter instanceof SlurInter)) {
+                return false;
+            }
+
+            final Scale scale = sheet.getScale();
+            final Rectangle box = inter.getBounds();
+
+            if ((box.width <= scale.toPixels(constants.maxClefCurlPieceWidth))
+                    && (box.height >= scale.toPixels(constants.minClefCurlPieceHeight))) {
+                return true;
+            }
+
+            return (box.width <= scale.toPixels(constants.maxClefCurlWidth))
+                    && (box.height >= scale.toPixels(constants.minClefCurlHeight));
         }
 
         //-------------//
@@ -452,9 +512,9 @@ public class SymbolsFilter
                         continue;
                     }
 
-                    // Likewise for a weak hollow head and its stem: the curl and line of a
-                    // treble clef change fit them, and erasing them leaves no clef to find.
-                    if (isWeakVoidHead(inter)) {
+                    // Likewise for a weak hollow or small head and its stem: the curl and line of
+                    // a treble clef change fit them, and erasing them leaves no clef to find.
+                    if (isWeakHead(inter) || isClefCurl(inter)) {
                         continue;
                     }
 

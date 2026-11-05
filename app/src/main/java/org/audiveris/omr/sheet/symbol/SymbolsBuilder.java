@@ -32,12 +32,14 @@ import org.audiveris.omr.glyph.GlyphGroup;
 import org.audiveris.omr.glyph.GlyphLink;
 import org.audiveris.omr.glyph.Glyphs;
 import org.audiveris.omr.glyph.Grades;
+import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.math.GeoUtil;
 import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sig.SIGraph;
+import org.audiveris.omr.sig.inter.ClefInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.SmallChordInter;
 import org.audiveris.omr.sig.relation.Exclusion;
@@ -215,6 +217,19 @@ public class SymbolsBuilder
         final SIGraph sig = system.getSig();
         final List<Inter> createdInters = new ArrayList<>();
 
+        if (isTrebleClefChange(glyph, closestStaff)) {
+            final Inter clef = ClefInter.createValid(
+                    glyph,
+                    Shape.G_CLEF_SMALL,
+                    constants.clefChangeGrade.getValue(),
+                    closestStaff);
+
+            if (clef != null) {
+                sig.addVertex(clef);
+                createdInters.add(clef);
+            }
+        }
+
         for (Evaluation eval : evals) {
             try {
                 final Inter created = factory.create(eval, glyph, closestStaff);
@@ -231,6 +246,53 @@ public class SymbolsBuilder
                 logger.warn("Error in glyph evaluation " + ex, ex);
             }
         }
+    }
+
+    //--------------------//
+    // isTrebleClefChange //
+    //--------------------//
+    /**
+     * Tell whether a glyph is the small treble clef of a clef change within a staff.
+     * <p>
+     * The classifier hardly knows this shape: it scores it too low to be kept, often below 0.1,
+     * though G_CLEF is its first choice. Besides that choice, the glyph must have the dimensions
+     * of such a clef and stand where it does, from a bit above the staff to a bit below it.
+     *
+     * @param glyph the glyph to check
+     * @param staff the closest staff
+     * @return true if so
+     */
+    private boolean isTrebleClefChange (Glyph glyph,
+                                        Staff staff)
+    {
+        final Rectangle box = glyph.getBounds();
+        final double interline = sheet.getInterline();
+        final double width = box.width / interline;
+        final double height = box.height / interline;
+
+        if ((width < constants.minClefChangeWidth.getValue())
+                || (width > constants.maxClefChangeWidth.getValue())
+                || (height < constants.minClefChangeHeight.getValue())
+                || (height > constants.maxClefChangeHeight.getValue())) {
+            return false;
+        }
+
+        final double above = (staff.getFirstLine().yAt(box.x) - box.y) / interline;
+        final double below = ((box.y + box.height) - staff.getLastLine().yAt(box.x)) / interline;
+
+        if ((above < 0) || (above > constants.maxClefChangeMargin.getValue()) || (below < 0)
+                || (below > constants.maxClefChangeMargin.getValue())) {
+            return false;
+        }
+
+        final Evaluation[] top = classifier.evaluate(
+                glyph,
+                system,
+                1,
+                0.0,
+                EnumSet.noneOf(Classifier.Condition.class));
+
+        return (top.length > 0) && (top[0].shape == Shape.G_CLEF);
     }
 
     //------------------//
@@ -396,6 +458,30 @@ public class SymbolsBuilder
                 "Glyphs",
                 7,
                 "Maximum number of parts considered for a symbol");
+
+        private final Scale.Fraction minClefChangeWidth = new Scale.Fraction(
+                1.5,
+                "Minimum width of a small treble clef");
+
+        private final Scale.Fraction maxClefChangeWidth = new Scale.Fraction(
+                2.4,
+                "Maximum width of a small treble clef");
+
+        private final Scale.Fraction minClefChangeHeight = new Scale.Fraction(
+                4.8,
+                "Minimum height of a small treble clef");
+
+        private final Scale.Fraction maxClefChangeHeight = new Scale.Fraction(
+                6.2,
+                "Maximum height of a small treble clef");
+
+        private final Scale.Fraction maxClefChangeMargin = new Scale.Fraction(
+                1.5,
+                "Maximum extent of a small treble clef above or below its staff");
+
+        private final Constant.Ratio clefChangeGrade = new Constant.Ratio(
+                0.8,
+                "Grade given to a small treble clef recognized from its shape");
 
         private final Constant.Integer maxEvaluationCount = new Constant.Integer(
                 "Evaluations",
