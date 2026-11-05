@@ -165,6 +165,146 @@ public class TupletsBuilder
                 tuplet.remove();
             }
         }
+
+        separateSharedChords();
+    }
+
+    //----------------------//
+    // separateSharedChords //
+    //----------------------//
+    /**
+     * When two tuplet signs embrace exactly the same chords, as both hands playing triplets together
+     * can make them do, have the sign further from these chords look for other chords, or
+     * else the other sign.
+     */
+    private void separateSharedChords ()
+    {
+        final List<TupletInter> tuplets = new ArrayList<>(stack.getTuplets());
+
+        for (TupletInter one : tuplets) {
+            for (TupletInter two : tuplets) {
+                if ((one.getId() >= two.getId()) || !one.getChords().equals(two.getChords())) {
+                    continue;
+                }
+
+                final boolean oneIsFar = distanceToChords(one, one.getChords()) > distanceToChords(
+                        two,
+                        two.getChords());
+
+                if (!moveAway(oneIsFar ? one : two, tuplets)) {
+                    moveAway(oneIsFar ? two : one, tuplets);
+                }
+            }
+        }
+    }
+
+    //----------//
+    // moveAway //
+    //----------//
+    /**
+     * Link a tuplet sign to consecutive chords it is centered on, that no other sign embraces
+     * and that are neither much further from it nor much wider than its current chords.
+     *
+     * @param tuplet  the sign to move
+     * @param tuplets all the signs of the stack
+     * @return true if it moved
+     */
+    private boolean moveAway (TupletInter tuplet,
+                              List<TupletInter> tuplets)
+    {
+        if (tuplet.isManual()) {
+            return false;
+        }
+
+        final List<AbstractChordInter> around = getChordsAround(tuplet);
+        final List<AbstractChordInter> candidates = new ArrayList<>(around);
+
+        for (TupletInter other : tuplets) {
+            if (other != tuplet) {
+                candidates.removeAll(other.getChords());
+            }
+        }
+
+        final SortedSet<AbstractChordInter> chords = getEmbracedChords(tuplet, candidates);
+
+        if ((chords == null) || !isCentered(tuplet, chords) || !isConsecutive(chords, around)
+                || !isOneGroup(chords) || (distanceToChords(tuplet, chords) > (distanceToChords(
+                        tuplet,
+                        tuplet.getChords()) + (2 * stack.getSystem().getSheet().getInterline())))
+                || (span(chords) > (1.5 * span(tuplet.getChords())))) {
+            return false;
+        }
+
+        final SIGraph sig = stack.getSystem().getSig();
+
+        for (Relation rel : sig.getRelations(tuplet, ChordTupletRelation.class)) {
+            sig.removeEdge(rel);
+        }
+
+        for (AbstractChordInter chord : chords) {
+            new Link(chord, new ChordTupletRelation(tuplet.getShape()), false).applyTo(tuplet);
+        }
+
+        logger.info("{} moved away from the chords of another sign", tuplet);
+
+        return true;
+    }
+
+    //------------//
+    // isOneGroup //
+    //------------//
+    /**
+     * Tell whether the head chords all belong to one beam group, or none has a beam.
+     */
+    private static boolean isOneGroup (SortedSet<AbstractChordInter> chords)
+    {
+        final Set<Object> groups = new LinkedHashSet<>();
+        boolean unbeamed = false;
+
+        for (AbstractChordInter chord : chords) {
+            if (!chord.isRest()) {
+                if (chord.getBeams().isEmpty()) {
+                    unbeamed = true;
+                } else {
+                    groups.add(chord.getBeams().get(0).getGroup());
+                }
+            }
+        }
+
+        return (groups.size() <= 1) && (groups.isEmpty() || !unbeamed);
+    }
+
+    private static int span (Collection<AbstractChordInter> chords)
+    {
+        int left = Integer.MAX_VALUE;
+        int right = Integer.MIN_VALUE;
+
+        for (AbstractChordInter chord : chords) {
+            left = Math.min(left, chord.getCenter().x);
+            right = Math.max(right, chord.getCenter().x);
+        }
+
+        return right - left;
+    }
+
+    //------------------//
+    // distanceToChords //
+    //------------------//
+    /**
+     * Report the vertical distance from a tuplet sign to the closest of the provided chords.
+     */
+    private static int distanceToChords (TupletInter tuplet,
+                                         Collection<AbstractChordInter> chords)
+    {
+        final int y = tuplet.getCenter().y;
+        int best = Integer.MAX_VALUE;
+
+        for (AbstractChordInter chord : chords) {
+            final Rectangle box = chord.getBounds();
+            best = Math.min(best, Math.max(0, Math.max(box.y - y, y - (box.y + box.height))));
+        }
+
+        return best;
     }
 
     //-------------//
