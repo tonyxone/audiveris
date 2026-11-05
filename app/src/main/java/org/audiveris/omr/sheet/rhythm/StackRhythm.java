@@ -435,6 +435,18 @@ public class StackRhythm
             }
 
             if (!isLong(measure, expected)) {
+                // Voices may share out the notes of a beat triplet and the measure still fit
+                if (!compound) {
+                    final List<List<AbstractChordInter>> triplets = beatTripletsOfFour(
+                            measure,
+                            new Rational(1, current.den));
+
+                    if (!triplets.isEmpty()) {
+                        forced.put(measure, triplets);
+                        added = true;
+                    }
+                }
+
                 continue;
             }
 
@@ -1238,6 +1250,54 @@ public class StackRhythm
         }
 
         return groups;
+    }
+
+    //--------------------//
+    // beatTripletsOfFour //
+    //--------------------//
+    /**
+     * The beam groups of 4 chords of a measure, three of equal duration and a fourth of twice
+     * it, that start on a beat and fill it only if the three make a triplet: three sixteenths
+     * and an eighth in a quarter beat.
+     * <p>
+     * Read plain, they last a beat and a quarter, and the next notes of the line may go to
+     * another voice, so that the measure fits with notes played at the wrong time.
+     *
+     * @param measure the measure to inspect
+     * @param beat    the beat duration of the simple time
+     * @return the three chords of each such group
+     */
+    private static List<List<AbstractChordInter>> beatTripletsOfFour (Measure measure,
+                                                                     Rational beat)
+    {
+        final Set<AbstractChordInter> chords = measure.getStandardChords();
+        final List<List<AbstractChordInter>> triplets = new ArrayList<>();
+
+        for (BeamGroupInter bg : measure.getBeamGroups()) {
+            final List<AbstractChordInter> four = new ArrayList<>(bg.getChords());
+
+            if ((four.size() != 4) || !chords.containsAll(four)
+                    || four.stream().anyMatch(c -> c.getTuplet() != null)) {
+                continue;
+            }
+
+            Collections.sort(four, Inters.byCenterAbscissa);
+            final List<AbstractChordInter> three = tripletOfFour(four);
+            final Rational start = four.get(0).getTimeOffset();
+
+            if ((three == null) || (start == null)) {
+                continue;
+            }
+
+            final Rational d = three.get(0).getDurationSansTuplet();
+
+            // The three as a triplet, with the fourth, fill the beat they start on
+            if (d.times(4).equals(beat) && (start.divides(beat).den == 1)) {
+                triplets.add(three);
+            }
+        }
+
+        return triplets;
     }
 
     //---------------//
