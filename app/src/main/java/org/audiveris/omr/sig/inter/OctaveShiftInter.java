@@ -897,23 +897,20 @@ public class OctaveShiftInter
                                 double grade,
                                 Staff closestStaff)
     {
-        // TODO: Search a more suitable staff than just the vertically closest one
-        final Staff staff = closestStaff;
-        //
         // Item cannot be located within staff height
         final Point center = glyph.getCenter();
 
-        if (staff.distanceTo(center) <= 0) {
+        if (closestStaff.distanceTo(center) <= 0) {
             return null;
         }
 
-        final Sheet sheet = staff.getSystem().getSheet();
+        final Sheet sheet = closestStaff.getSystem().getSheet();
 
-        // A sign between two systems is read in each: it belongs to the closer staff
-        final Staff nearest = sheet.getStaffManager().getClosestStaff(center);
+        // A sign between two systems is read in each: only one of them gets it
+        final Staff staff = getOwnerStaff(glyph, sheet);
 
-        if ((nearest != null) && (nearest != staff)) {
-            logger.debug("OctaveShift value {} is closer to {}, discarded", glyph, nearest);
+        if (staff.getSystem() != closestStaff.getSystem()) {
+            logger.debug("OctaveShift value {} belongs to {}, discarded", glyph, staff);
             return null;
         }
 
@@ -966,7 +963,7 @@ public class OctaveShiftInter
                 continue;
             }
 
-            final Staff staff = sheet.getStaffManager().getClosestStaff(glyph.getCenter());
+            final Staff staff = getOwnerStaff(glyph, sheet);
 
             if ((staff == null) || (staff.getSystem() != system)) {
                 continue;
@@ -994,6 +991,104 @@ public class OctaveShiftInter
                 system.getSig().addVertex(os);
             }
         }
+    }
+
+    //---------------//
+    // getOwnerStaff //
+    //---------------//
+    /**
+     * Report the staff an octave sign applies to.
+     * <p>
+     * Between two staves the sign most often applies to the lower one, even when printed closer
+     * to the upper one: an "8va" above a staff is far more frequent than an "8vb" below a staff.
+     * It applies to the upper one only when hugging it, or closer to it and reading "8vb".
+     *
+     * @param glyph the value glyph of the sign
+     * @param sheet the containing sheet
+     * @return the staff to shift
+     */
+    private static Staff getOwnerStaff (Glyph glyph,
+                                        Sheet sheet)
+    {
+        final Point point = glyph.getCenter();
+        final Staff closest = sheet.getStaffManager().getClosestStaff(point);
+        Staff upper = null;
+        Staff lower = null;
+        double upperGap = Double.MAX_VALUE;
+        double lowerGap = Double.MAX_VALUE;
+
+        for (Staff staff : sheet.getStaffManager().getStaves()) {
+            if ((point.x < staff.getAbscissa(HorizontalSide.LEFT))
+                    || (point.x > staff.getAbscissa(HorizontalSide.RIGHT))) {
+                continue;
+            }
+
+            final double above = point.y - staff.getLastLine().yAt(point.x);
+            final double below = staff.getFirstLine().yAt(point.x) - point.y;
+
+            if ((above > 0) && (above < upperGap)) {
+                upper = staff;
+                upperGap = above;
+            }
+
+            if ((below > 0) && (below < lowerGap)) {
+                lower = staff;
+                lowerGap = below;
+            }
+        }
+
+        if ((upper == null) || (lower == null)) {
+            return closest;
+        }
+
+        if (upperGap < (constants.maxUpperStaffRatio.getValue() * lowerGap)) {
+            return upper;
+        }
+
+        return ((upperGap < lowerGap) && readsBassa(glyph, sheet)) ? upper : lower;
+    }
+
+    //------------//
+    // readsBassa //
+    //------------//
+    /**
+     * Tell whether the letters that follow the value of an octave sign read "vb": beyond the
+     * short "v", a tall stem rises as high as the value, which the "a" of "8va" does not.
+     *
+     * @param glyph the value glyph of the sign
+     * @param sheet the containing sheet
+     * @return true if so
+     */
+    private static boolean readsBassa (Glyph glyph,
+                                       Sheet sheet)
+    {
+        final ByteProcessor buf = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
+
+        if (buf == null) {
+            return false;
+        }
+
+        final Rectangle box = glyph.getBounds();
+        final int interline = sheet.getScale().getInterline();
+        final int xMax = Math.min(box.x + box.width + (3 * interline), buf.getWidth());
+        final int yMax = Math.min(box.y + (box.height / 2), buf.getHeight());
+        final int yMin = Math.max(0, box.y + (box.height / 8));
+
+        for (int x = box.x + box.width; x < xMax; x++) {
+            int ink = 0;
+
+            for (int y = yMin; y < yMax; y++) {
+                if (buf.get(x, y) == 0) {
+                    ink++;
+                }
+            }
+
+            if (ink >= (0.9 * (yMax - yMin))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     //--------------//
@@ -1182,6 +1277,7 @@ public class OctaveShiftInter
         final int height = buf.getHeight();
         final int clearance = Math.max(2, interline / 4);
         final int maxGap = 2 * interline;
+        final int minRun = Math.max(2, interline / 3);
         final int x1 = box.x + box.width;
         Integer best = null;
 
@@ -1192,6 +1288,8 @@ public class OctaveShiftInter
 
             int last = -1;
             int gap = 0;
+            int run = 0;
+            boolean lineSeen = false; // Before any line, a tall stem is a letter, as in "8va"
 
             for (int c = x1; c < width && gap <= maxGap; c++) {
                 final boolean core = buf.get(c, r - 1) == 0 || buf.get(c, r) == 0
@@ -1201,10 +1299,13 @@ public class OctaveShiftInter
                         && buf.get(c, r + clearance) != 0
                         && buf.get(c, r + clearance + 1) != 0;
 
+                run = (core && clear) ? run + 1 : 0;
+                lineSeen |= run >= minRun;
+
                 if (core && clear) {
                     last = c;
                     gap = 0;
-                } else if (core && isHook(buf, c, r, clearance, interline)) {
+                } else if (core && lineSeen && isHook(buf, c, r, clearance, interline)) {
                     last = c;
 
                     break;
@@ -1279,6 +1380,10 @@ public class OctaveShiftInter
         private final Constant.Ratio minTextRun = new Constant.Ratio(
                 2.8,
                 "Run of tall ink, in value widths, from which the value may be a text character");
+
+        private final Constant.Ratio maxUpperStaffRatio = new Constant.Ratio(
+                0.3,
+                "Ratio of gaps to the staves around a sign below which it applies to the upper one");
 
         private final Constant.Ratio minLineShare = new Constant.Ratio(
                 0.6,
