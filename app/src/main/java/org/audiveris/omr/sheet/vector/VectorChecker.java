@@ -467,6 +467,23 @@ public abstract class VectorChecker
      */
     public static Map<Glyph, Kind> drawnOctaves (SystemInfo system)
     {
+        return drawnGlyphs(system, Category.OCTAVE);
+    }
+
+    //-------------//
+    // drawnGlyphs //
+    //-------------//
+    /**
+     * Report the symbols of a category the PDF draws in a system: for each, a glyph of the
+     * black pixels within its bounds, with its kind.
+     *
+     * @param system   the system to process
+     * @param category the category of symbols
+     * @return the glyphs of the drawn symbols, with their kind
+     */
+    private static Map<Glyph, Kind> drawnGlyphs (SystemInfo system,
+                                                 Category category)
+    {
         final Sheet sheet = system.getSheet();
         final VectorSymbols vectorSymbols = VectorSymbols.of(sheet);
         final Map<Glyph, Kind> glyphs = new LinkedHashMap<>();
@@ -478,7 +495,7 @@ public abstract class VectorChecker
         final ByteProcessor binary = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
         final Rectangle image = new Rectangle(0, 0, binary.getWidth(), binary.getHeight());
 
-        for (Symbol symbol : vectorSymbols.intersected(Category.OCTAVE, system.getBounds())) {
+        for (Symbol symbol : vectorSymbols.intersected(category, system.getBounds())) {
             final Rectangle roi = symbol.bounds().getBounds().intersection(image);
 
             if (roi.isEmpty() || !system.getArea().contains(
@@ -502,6 +519,21 @@ public abstract class VectorChecker
         }
 
         return glyphs;
+    }
+
+    //--------------//
+    // drawnTuplets //
+    //--------------//
+    /**
+     * Report the tuplet numbers the PDF draws in a system, as LilyPond does with lone italic
+     * digits: for each, a glyph of the black pixels within the digit, with its kind.
+     *
+     * @param system the system to process
+     * @return the glyphs of the drawn tuplet numbers, with their kind
+     */
+    public static Map<Glyph, Kind> drawnTuplets (SystemInfo system)
+    {
+        return drawnGlyphs(system, Category.TUPLET);
     }
 
     //--------------//
