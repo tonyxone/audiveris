@@ -1187,6 +1187,11 @@ public class KeyInter
                         staffAlters.get(i),
                         staff)) {
                     logger.debug("Sign after a head in its bar is no key: {}", staffAlters.get(i));
+                } else if ((keyConfig != null) && (i == 0) && contradictsHeader(
+                        keyConfig,
+                        staffAlters.get(0),
+                        headerKey)) {
+                    logger.debug("Signs against the header key are no key: {}", staffAlters.get(0));
                 } else if (keyConfig != null) {
                     final List<AlterInter> members = staffAlters.subList(
                             i,
@@ -1196,6 +1201,36 @@ public class KeyInter
                 }
             }
         }
+    }
+
+    //-------------------//
+    // contradictsHeader //
+    //-------------------//
+    /**
+     * Tell whether signs right after the header key, of the other kind, would make a key.
+     * <p>
+     * A new key cancels the old one first: sharps right after a key of flats, or the reverse,
+     * are the accidentals of the first chord.
+     *
+     * @param keyConfig the key the signs would make
+     * @param first     the first of these signs
+     * @param headerKey the key of the staff header, perhaps null
+     * @return true if so
+     */
+    private static boolean contradictsHeader (KeyConfig keyConfig,
+                                              AlterInter first,
+                                              KeyInter headerKey)
+    {
+        if ((headerKey == null) || (headerKey.getFifths() == null)
+                || (Integer.signum(headerKey.getFifths()) != -Integer.signum(keyConfig.fifths))) {
+            return false;
+        }
+
+        final Scale scale = first.getSig().getSystem().getSheet().getScale();
+        final Rectangle header = headerKey.getBounds();
+        final int gap = first.getBounds().x - (header.x + header.width);
+
+        return gap <= scale.toPixels(constants.maxHeaderKeyGap);
     }
 
     //-------------//
@@ -1537,6 +1572,10 @@ public class KeyInter
         private final Fraction maxInternalXGap = new Fraction(
                 0.5,
                 "Maximum abscissa gap between two key signs");
+
+        private final Fraction maxHeaderKeyGap = new Fraction(
+                2.0,
+                "Maximum abscissa gap from the header key to signs that cannot start a key");
 
         private final Constant.Ratio minOverlapIou = new Constant.Ratio(
                 0.4,
