@@ -58,6 +58,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -380,6 +381,55 @@ public abstract class VectorChecker
                 + (box.getWidth() * box.getHeight()) - inter;
 
         return inter >= (constants.minClefOverlap.getValue() * union);
+    }
+
+    //--------------//
+    // drawnOctaves //
+    //--------------//
+    /**
+     * Report the octave signs the PDF draws in a system: for each, a glyph of the black pixels
+     * within the bounds of its value, with the kind of its value.
+     *
+     * @param system the system to process
+     * @return the glyphs of the drawn octave values, with their kind
+     */
+    public static Map<Glyph, Kind> drawnOctaves (SystemInfo system)
+    {
+        final Sheet sheet = system.getSheet();
+        final VectorSymbols vectorSymbols = VectorSymbols.of(sheet);
+        final Map<Glyph, Kind> glyphs = new LinkedHashMap<>();
+
+        if (vectorSymbols.isEmpty()) {
+            return glyphs;
+        }
+
+        final ByteProcessor binary = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
+        final Rectangle image = new Rectangle(0, 0, binary.getWidth(), binary.getHeight());
+
+        for (Symbol symbol : vectorSymbols.intersected(Category.OCTAVE, system.getBounds())) {
+            final Rectangle roi = symbol.bounds().getBounds().intersection(image);
+
+            if (roi.isEmpty() || !system.getArea().contains(
+                    symbol.bounds().getCenterX(),
+                    symbol.bounds().getCenterY())) {
+                continue;
+            }
+
+            final Point offset = new Point();
+            final RunTable table = new RunTableFactory(VERTICAL).createTable(binary, roi).trim(
+                    offset);
+
+            if (table.getWeight() == 0) {
+                continue;
+            }
+
+            glyphs.put(
+                    sheet.getGlyphIndex().registerOriginal(
+                            new Glyph(roi.x + offset.x, roi.y + offset.y, table)),
+                    symbol.kind());
+        }
+
+        return glyphs;
     }
 
     //--------------//
