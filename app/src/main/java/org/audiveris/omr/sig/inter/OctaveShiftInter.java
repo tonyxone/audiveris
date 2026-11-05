@@ -1504,6 +1504,7 @@ public class OctaveShiftInter
             int last = -1;
             int gap = 0;
             int run = 0;
+            int hook = -1; // A hook ends the line, unless the line goes on right after it
             boolean lineSeen = false; // Before any line, a tall stem is a letter, as in "8va"
 
             for (int c = x1; c < width && gap <= maxGap; c++) {
@@ -1517,13 +1518,22 @@ public class OctaveShiftInter
                 run = (core && clear) ? run + 1 : 0;
                 lineSeen |= run >= minRun;
 
-                if (core && clear) {
-                    last = c;
-                    gap = 0;
-                } else if (core && lineSeen && isHook(buf, c, r, clearance, interline)) {
-                    last = c;
+                if ((hook >= 0) && (c - hook > maxGap)) {
+                    break; // Nothing went on: it was the end hook
+                }
 
-                    break;
+                if (core && clear) {
+                    // Past a hook, only a dash resumes the line: a stem reaching up to the
+                    // line looks like a hook
+                    if ((hook < 0) || (run >= minRun)) {
+                        hook = -1;
+                        last = c;
+                        gap = 0;
+                    }
+                } else if (core && lineSeen && (hook < 0)
+                        && isHook(buf, c, r, clearance, interline)) {
+                    last = c;
+                    hook = c;
                 } else if (last >= 0 || c - x1 > maxGap) {
                     gap++;
                 }
