@@ -27,7 +27,9 @@ import org.audiveris.omr.constant.ConstantSet;
 import org.audiveris.omr.glyph.dynamic.Filament;
 import org.audiveris.omr.glyph.dynamic.FilamentBoard;
 import org.audiveris.omr.glyph.dynamic.FilamentView;
+import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
+import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.ui.PixelBoard;
 import org.audiveris.omr.sheet.ui.SheetAssembly;
 import org.audiveris.omr.sheet.ui.SheetTab;
@@ -38,10 +40,16 @@ import org.audiveris.omr.ui.BoardsPane;
 import org.audiveris.omr.ui.selection.EntityService;
 import org.audiveris.omr.ui.view.ScrollView;
 import org.audiveris.omr.util.Navigable;
+import static org.audiveris.omr.util.HorizontalSide.LEFT;
+import static org.audiveris.omr.util.HorizontalSide.RIGHT;
 import org.audiveris.omr.util.StopWatch;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Class <code>GridBuilder</code> computes the grid of systems of a sheet picture, based on
@@ -155,6 +163,9 @@ public class GridBuilder
             // Complete the staff lines w/ sections & filaments left over
             watch.start("completeLines");
             linesRetriever.completeLines();
+
+            // The staves now tell the true interline
+            checkInterline();
         } catch (StepException se) {
             throw se;
         } catch (Throwable ex) {
@@ -164,6 +175,65 @@ public class GridBuilder
                 watch.print();
             }
         }
+    }
+
+    //----------------//
+    // checkInterline //
+    //----------------//
+    /**
+     * Correct the sheet interline when the staves found clearly disagree with it.
+     * <p>
+     * The interline comes from a histogram of vertical runs, where a page full of stacked beams
+     * can win over the staff lines. Staves can still be found, but with a wrong interline every
+     * shape template gets the wrong size and every pitch is computed with the wrong step.
+     * <p>
+     * When all staves were found with the small interline, there is just one size in fact: the
+     * larger one came from no staff, and these staves are not small.
+     */
+    private void checkInterline ()
+    {
+        final Scale scale = sheet.getScale();
+
+        final List<Staff> staves = sheet.getStaffManager().getStaves();
+
+        if ((scale.getSmallInterline() != null) && !staves.stream().allMatch(Staff::isSmall)) {
+            return; // Two staff sizes: no single value to check against
+        }
+
+        final List<Double> spacings = new ArrayList<>();
+
+        for (Staff staff : staves) {
+            if (staff.getLineCount() == 5) {
+                final double x = (staff.getAbscissa(LEFT) + staff.getAbscissa(RIGHT)) / 2;
+                spacings.add((staff.getLastLine().yAt(x) - staff.getFirstLine().yAt(x)) / 4);
+            }
+        }
+
+        if (spacings.isEmpty()) {
+            return;
+        }
+
+        Collections.sort(spacings);
+
+        final double measured = spacings.get(spacings.size() / 2);
+
+        if (Math.abs(measured - scale.getInterline()) < constants.minInterlineGap.getValue()) {
+            return;
+        }
+
+        final int interline = (int) Math.rint(measured);
+        final int wrong = scale.getInterline();
+        logger.info("Interline {} corrected to {} from staves", wrong, interline);
+        scale.discardSmallScales();
+        scale.setItemValue(Scale.Item.interline, interline);
+
+        // A beam thickness that could not be measured was guessed from the wrong interline
+        if (scale.isBeamExtrapolated()) {
+            scale.setExtrapolatedBeam(
+                    (int) Math.rint((double) (scale.getBeamThickness() * interline) / wrong));
+        }
+
+        staves.forEach(staff -> staff.setRegularSize(interline));
     }
 
     //~ Inner Classes ------------------------------------------------------------------------------
@@ -182,5 +252,10 @@ public class GridBuilder
 
         private final Constant.Boolean displayFilaments =
                 new Constant.Boolean(false, "Should we show the filaments view?");
+
+        private final Constant.Double minInterlineGap = new Constant.Double(
+                "pixels",
+                1.0,
+                "Minimum gap between sheet and staves interlines to correct the sheet one");
     }
 }

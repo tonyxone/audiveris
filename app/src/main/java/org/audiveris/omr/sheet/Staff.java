@@ -1460,6 +1460,20 @@ public class Staff
         return sideBars.get(side);
     }
 
+    //----------------//
+    // setRegularSize //
+    //----------------//
+    /**
+     * Assign this staff its corrected interline, as a staff of regular size.
+     *
+     * @param specificInterline the staff interline
+     */
+    public void setRegularSize (int specificInterline)
+    {
+        this.specificInterline = specificInterline;
+        isSmall = false;
+    }
+
     //----------------------//
     // getSpecificInterline //
     //----------------------//
