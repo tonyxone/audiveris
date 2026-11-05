@@ -252,7 +252,10 @@ public class VectorSymbols
         TIME_9(Category.TIME),
         OCTAVE_8(Category.OCTAVE),
         OCTAVE_15(Category.OCTAVE),
-        OCTAVE_22(Category.OCTAVE);
+        OCTAVE_22(Category.OCTAVE),
+        /** A lone italic value, which is an octave sign only if a line follows it. */
+        OCTAVE_8_BARE(Category.OCTAVE),
+        OCTAVE_15_BARE(Category.OCTAVE);
 
         public final Category category;
 
@@ -571,6 +574,9 @@ public class VectorSymbols
         /** The right end of the last character of the row. */
         private double octaveRight;
 
+        /** Whether the value of the row is drawn in italics. */
+        private boolean octaveItalic;
+
         GlyphCollector (PDRectangle box,
                         double sx,
                         double sy)
@@ -616,7 +622,7 @@ public class VectorSymbols
                 return;
             }
 
-            trackOctave(c, bounds);
+            trackOctave(c, bounds, font);
 
             if (kind != null) {
                 symbols.add(new Symbol(kind, bounds, false));
@@ -668,7 +674,8 @@ public class VectorSymbols
          * A symbol is then recorded with the bounds of the value.
          */
         private void trackOctave (Character c,
-                                  Rectangle2D bounds)
+                                  Rectangle2D bounds,
+                                  PDFont font)
         {
             final boolean near = (octave.length() > 0) && (bounds.getMinX() - octaveRight
                     < octaveValue.getHeight()) && (Math.abs(bounds.getMaxY() - octaveValue
@@ -679,14 +686,16 @@ public class VectorSymbols
                     octave.append(c);
                     octaveValue = octaveValue.createUnion(bounds);
                 } else {
-                    octave.setLength(0);
+                    endOctave();
                     octave.append(c);
                     octaveValue = (Rectangle2D) bounds.clone();
+                    octaveItalic = (font.getName() != null) && font.getName().matches(
+                            "(?i).*(ital|oblique).*");
                 }
             } else if ((c != null) && near && ("vmab".indexOf(c) >= 0)) {
                 octave.append(c);
             } else {
-                octave.setLength(0);
+                endOctave();
                 return;
             }
 
@@ -703,6 +712,30 @@ public class VectorSymbols
                 symbols.add(new Symbol(kind, octaveValue, false));
                 octave.setLength(0);
             }
+        }
+
+        //-----------//
+        // endOctave //
+        //-----------//
+        /**
+         * End the row of characters: a value left alone, in italics, may be a bare octave sign.
+         */
+        private void endOctave ()
+        {
+            if (octaveItalic) {
+                final Kind kind = switch (octave.toString()) {
+                    case "8" -> Kind.OCTAVE_8_BARE;
+                    case "15" -> Kind.OCTAVE_15_BARE;
+                    default -> null;
+                };
+
+                if (kind != null) {
+                    symbols.add(new Symbol(kind, octaveValue, false));
+                }
+            }
+
+            octave.setLength(0);
+            octaveItalic = false;
         }
     }
 }

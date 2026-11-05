@@ -983,6 +983,20 @@ public class OctaveShiftInter
             final Rectangle around = glyph.getBounds();
             around.grow(margin, margin);
 
+            final Staff staff = system.getClosestStaff(glyph.getCenter2D());
+
+            if (staff == null) {
+                continue;
+            }
+
+            final VectorSymbols.Kind kind = entry.getValue();
+
+            if (((kind == VectorSymbols.Kind.OCTAVE_8_BARE)
+                    || (kind == VectorSymbols.Kind.OCTAVE_15_BARE)) && !isBareSign(glyph, sheet,
+                            staff)) {
+                continue;
+            }
+
             // A sign already recognized there is confirmed: the value of a weak one may get
             // purged otherwise. Its bounds take its line in, so compare with its value.
             final List<Inter> there = known.stream().filter(
@@ -997,14 +1011,8 @@ public class OctaveShiftInter
                 continue;
             }
 
-            final Staff staff = system.getClosestStaff(glyph.getCenter2D());
-
-            if (staff == null) {
-                continue;
-            }
-
-            final Shape shape = switch (entry.getValue()) {
-                case OCTAVE_15 -> Shape.QUINDICESIMA;
+            final Shape shape = switch (kind) {
+                case OCTAVE_15, OCTAVE_15_BARE -> Shape.QUINDICESIMA;
                 case OCTAVE_22 -> Shape.VENTIDUESIMA;
                 default -> Shape.OTTAVA;
             };
@@ -1017,6 +1025,59 @@ public class OctaveShiftInter
                 known.add(os);
             }
         }
+    }
+
+    //------------//
+    // isBareSign //
+    //------------//
+    /**
+     * Whether a lone value is an octave sign: a dashed line runs from it for at least two
+     * interlines. A solid one is rather a hairpin starting by a tuplet number, or the bracket
+     * of a tuplet, which may slant away from the value: so the dashes are counted, as runs of
+     * inked columns around the middle of the value, about one per interline.
+     */
+    private static boolean isBareSign (Glyph glyph,
+                                       Sheet sheet,
+                                       Staff staff)
+    {
+        final ByteProcessor buf = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
+        final int interline = sheet.getScale().getInterline();
+        final Rectangle box = glyph.getBounds();
+        final int x1 = box.x + box.width;
+        final Integer end = lineEnd(buf, box, interline, staff.getAbscissa(HorizontalSide.RIGHT));
+
+        if ((end == null) || ((end - x1) < (2 * interline))) {
+            return false;
+        }
+
+        // Runs of inked columns along the line, around the middle of the value
+        final int y0 = Math.max(0, box.y + (box.height / 2) - (interline / 2));
+        final int y1 = Math.min(buf.getHeight() - 1, box.y + (box.height / 2) + (interline / 2));
+        int runs = 0;
+        int blank = 2;
+
+        for (int x = x1 + 1; x < end; x++) {
+            boolean ink = false;
+
+            for (int y = y0; y <= y1; y++) {
+                if (buf.get(x, y) == 0) {
+                    ink = true;
+                    break;
+                }
+            }
+
+            if (ink) {
+                if (blank >= 2) {
+                    runs++;
+                }
+
+                blank = 0;
+            } else {
+                blank++;
+            }
+        }
+
+        return runs >= (constants.minDashesPerInterline.getValue() * (end - x1) / interline);
     }
 
     //-----------//
@@ -1534,6 +1595,10 @@ public class OctaveShiftInter
         private final Constant.Ratio minTextRun = new Constant.Ratio(
                 2.8,
                 "Run of tall ink, in value widths, from which the value may be a text character");
+
+        private final Constant.Ratio minDashesPerInterline = new Constant.Ratio(
+                0.4,
+                "Minimum count of dashes per interline along the line of a lone octave value");
 
         private final Constant.Ratio drawnGrade = new Constant.Ratio(
                 0.8,
