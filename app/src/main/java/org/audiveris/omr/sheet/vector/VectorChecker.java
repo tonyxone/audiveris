@@ -44,6 +44,8 @@ import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.KeyAlterInter;
 import org.audiveris.omr.sig.inter.RestInter;
+import org.audiveris.omr.sig.relation.Exclusion;
+import org.audiveris.omr.sig.relation.NoExclusion;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -151,6 +153,7 @@ public abstract class VectorChecker
         // against trust, but is removed.
         int nConfirmed = 0;
         int nRemoved = 0;
+        final List<Inter> drawn = new ArrayList<>();
 
         for (Category category : Category.values()) {
             final List<Inter> good = confirmed.getOrDefault(category, Collections.emptyList());
@@ -167,6 +170,8 @@ public abstract class VectorChecker
                 inter.setGrade(Math.max(inter.getGrade(), Grades.intrinsicRatio));
             }
 
+            drawn.addAll(good);
+
             for (Inter inter : bad) {
                 if (inter.isVip()) {
                     logger.info("VIP {} not drawn by the PDF", inter);
@@ -179,8 +184,44 @@ public abstract class VectorChecker
             nRemoved += bad.size();
         }
 
+        keepDrawnOverlaps(drawn);
+
         logger.debug("S#{} vector check: {} confirmed, {} removed", system.getId(), nConfirmed,
                 nRemoved);
+    }
+
+    //-------------------//
+    // keepDrawnOverlaps //
+    //-------------------//
+    /**
+     * Two symbols of different kinds that the PDF both draws may overlap, such as the dot of a
+     * rest under the next natural: neither excludes the other.
+     *
+     * @param drawn the recognized symbols the PDF draws
+     */
+    private static void keepDrawnOverlaps (List<Inter> drawn)
+    {
+        for (int i = 0; i < drawn.size(); i++) {
+            final Inter inter = drawn.get(i);
+            final var sig = inter.getSig();
+
+            for (Inter other : drawn.subList(i + 1, drawn.size())) {
+                if ((kindOf(other).category == kindOf(inter).category)
+                        || !other.getBounds().intersects(inter.getBounds())) {
+                    continue;
+                }
+
+                Exclusion exclusion;
+
+                while ((exclusion = sig.getExclusion(inter, other)) != null) {
+                    sig.removeEdge(exclusion);
+                }
+
+                if (!sig.containsEdge(inter, other) && !sig.containsEdge(other, inter)) {
+                    sig.addEdge(inter, other, new NoExclusion());
+                }
+            }
+        }
     }
 
     //--------------//
