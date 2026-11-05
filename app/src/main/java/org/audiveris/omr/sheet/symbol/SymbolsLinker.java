@@ -409,12 +409,12 @@ public class SymbolsLinker
     // addMissedAlters //
     //-----------------//
     /**
-     * Add the naturals, sharps and flats a vector PDF draws where the image analysis found
-     * no alter: the naturals of a key change, after a barline and before a new time signature,
-     * can get lost with them, and the notes keep the old key; the accidental of a note, close
-     * to its head or to another accidental, can be missed too, and the note sounds the key.
-     * Each is linked to its head, if any. Those that make no key and have no head are removed
-     * later as abnormal.
+     * Add the naturals, sharps, flats and doubles a vector PDF draws where the image analysis
+     * found no alter: the naturals of a key change, after a barline and before a new time
+     * signature, can get lost with them, and the notes keep the old key; the accidental of a
+     * note, close to its head or to another accidental, can be missed too, and the note sounds
+     * the key. Each is linked to its head, if any. Those that make no key and have no head are
+     * removed later as abnormal.
      */
     private void addMissedAlters ()
     {
@@ -428,7 +428,12 @@ public class SymbolsLinker
         final List<Inter> heads = sig.inters(HeadInter.class);
         heads.addAll(sig.inters(StemInter.class));
 
-        for (Shape shape : new Shape[] { Shape.NATURAL, Shape.SHARP, Shape.FLAT }) {
+        for (Shape shape : new Shape[] {
+                Shape.NATURAL,
+                Shape.SHARP,
+                Shape.FLAT,
+                Shape.DOUBLE_SHARP,
+                Shape.DOUBLE_FLAT }) {
             for (Glyph glyph : VectorChecker.missedGlyphs(system, shape, known)) {
                 final Staff staff = system.getClosestStaff(glyph.getCenter2D());
 

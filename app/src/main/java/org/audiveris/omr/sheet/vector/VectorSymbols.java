@@ -117,11 +117,12 @@ public class VectorSymbols
         emmentaler(Kind.CLEF_G, "clefs.G", "clefs.G_change");
         emmentaler(Kind.CLEF_C, "clefs.C", "clefs.C_change");
         emmentaler(Kind.CLEF_F, "clefs.F", "clefs.F_change");
-        emmentaler(Kind.FLAT, "accidentals.flat");
-        emmentaler(Kind.NATURAL, "accidentals.natural");
-        emmentaler(Kind.SHARP, "accidentals.sharp");
-        emmentaler(Kind.DOUBLE_SHARP, "accidentals.doublesharp");
-        emmentaler(Kind.DOUBLE_FLAT, "accidentals.flatflat");
+        // Older versions of LilyPond name accidentals by their alteration in quarter tones
+        emmentaler(Kind.FLAT, "accidentals.flat", "accidentals.M2");
+        emmentaler(Kind.NATURAL, "accidentals.natural", "accidentals.0");
+        emmentaler(Kind.SHARP, "accidentals.sharp", "accidentals.2");
+        emmentaler(Kind.DOUBLE_SHARP, "accidentals.doublesharp", "accidentals.4");
+        emmentaler(Kind.DOUBLE_FLAT, "accidentals.flatflat", "accidentals.M4");
         emmentaler(Kind.AUGMENTATION_DOT, "dots.dot");
         emmentaler(Kind.STACCATO, "scripts.staccato");
         emmentaler(Kind.REST_WHOLE, "rests.0", "rests.0o");
