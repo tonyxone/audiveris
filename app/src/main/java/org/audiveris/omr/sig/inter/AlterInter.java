@@ -281,6 +281,24 @@ public class AlterInter
     private Collection<Link> lookupLinks (List<Inter> systemHeads,
                                           int profile)
     {
+        final Rectangle box = getBounds();
+
+        return lookupLinks(systemHeads, profile, box.x + box.width);
+    }
+
+    /**
+     * Try to detect link between this Alter instance and a head nearby (and its
+     * mirror head if any), looking from the provided abscissa.
+     *
+     * @param systemHeads ordered collection of heads in system
+     * @param profile     desired profile level
+     * @param xRef        abscissa to look for heads from, normally the accidental right side
+     * @return the collection of links found, perhaps null
+     */
+    private Collection<Link> lookupLinks (List<Inter> systemHeads,
+                                          int profile,
+                                          int xRef)
+    {
         if (systemHeads.isEmpty()) {
             return Collections.emptySet();
         }
@@ -298,7 +316,7 @@ public class AlterInter
         // Accid ref point is on accid right side and precise y depends on accid shape
         Rectangle accidBox = getBounds();
         Point accidPt = new Point(
-                accidBox.x + accidBox.width,
+                xRef,
                 ((shape != Shape.FLAT) && (shape != Shape.DOUBLE_FLAT)) ? (accidBox.y
                         + (accidBox.height / 2)) : (accidBox.y + ((3 * accidBox.height) / 4)));
         Rectangle luBox = new Rectangle(accidPt.x, accidPt.y - yGapMax, xGapMax, 2 * yGapMax);
@@ -359,6 +377,54 @@ public class AlterInter
         final int profile = Math.max(getProfile(), system.getProfile());
 
         return lookupLinks(systemHeads, profile);
+    }
+
+    //-----------------//
+    // searchLinksPast //
+    //-----------------//
+    /**
+     * Search the head of this accidental past the accidentals that stand right after it:
+     * the accidentals of a chord with many of them make columns, and the farthest ones can
+     * stand too far from their heads to be linked.
+     *
+     * @param system the containing system
+     * @param alters the other accidentals of the system
+     * @return the links found, perhaps empty
+     */
+    public Collection<Link> searchLinksPast (SystemInfo system,
+                                             List<Inter> alters)
+    {
+        final Scale scale = system.getSheet().getScale();
+        final int maxGap = scale.toPixels(constants.maxColumnGap);
+        final Rectangle box = getBounds();
+        int right = box.x + box.width;
+        boolean extended = true;
+
+        while (extended) {
+            extended = false;
+
+            for (Inter other : alters) {
+                final Rectangle ob = other.getBounds();
+
+                // Within the height of a chord around this accidental
+                final double dy = Math.abs(ob.getCenterY() - box.getCenterY());
+
+                if ((other != this) && (ob.x > box.x) && (ob.x <= right + maxGap)
+                        && (ob.x + ob.width > right) && (dy <= 2 * box.height)) {
+                    right = ob.x + ob.width;
+                    extended = true;
+                }
+            }
+        }
+
+        if (right == box.x + box.width) {
+            return Collections.emptySet();
+        }
+
+        final List<Inter> systemHeads = system.getSig().inters(HeadInter.class);
+        Collections.sort(systemHeads, Inters.byAbscissa);
+
+        return lookupLinks(systemHeads, Math.max(getProfile(), system.getProfile()), right);
     }
 
     //---------------//
@@ -556,6 +622,10 @@ public class AlterInter
                 "pitch",
                 0.65,
                 "Pitch offset of flat WRT mass center");
+
+        private final Scale.Fraction maxColumnGap = new Scale.Fraction(
+                0.5,
+                "Maximum horizontal gap between two columns of accidentals of a chord");
     }
 
     //-------//
