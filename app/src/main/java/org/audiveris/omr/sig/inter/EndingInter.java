@@ -504,6 +504,45 @@ public class EndingInter
         return (StaffBarlineInter) bars.get((side == HorizontalSide.LEFT) ? (bars.size() - 1) : 0);
     }
 
+    //---------------//
+    // lookupLastBar //
+    //---------------//
+    /**
+     * Report the last bar this ending passes over, if any.
+     *
+     * @param staff      related staff
+     * @param systemBars all the system barlines
+     * @param profile    desired profile level
+     * @return the last bar found between the ending ends, or null
+     */
+    private StaffBarlineInter lookupLastBar (Staff staff,
+                                            List<Inter> systemBars,
+                                            int profile)
+    {
+        final Scale scale = staff.getSystem().getSheet().getScale();
+        final int maxBarShift = scale.toPixels(EndingBarRelation.getXGapMaximum(profile));
+        final Point start = PointUtil.rounded(line.getP1());
+        final int x1 = start.x + maxBarShift;
+        final int x2 = (int) Math.floor(line.getX2()) - maxBarShift;
+
+        if (x2 <= x1) {
+            return null;
+        }
+
+        final Rectangle box = new Rectangle(x1, start.y, x2 - x1, 1);
+        box.height = staff.getLastLine().yAt(start.x) - start.y;
+
+        final List<Inter> bars = Inters.intersectedInters(systemBars, GeoOrder.NONE, box);
+
+        if (bars.isEmpty()) {
+            return null;
+        }
+
+        Collections.sort(bars, Inters.byAbscissa);
+
+        return (StaffBarlineInter) bars.get(bars.size() - 1);
+    }
+
     //---------------------//
     // lookupSentenceLinks //
     //---------------------//
@@ -590,6 +629,16 @@ public class EndingInter
             rightRel.setInOutGaps(rightDist, 0, profile);
 
             links.add(new Link(rightBar, rightRel, true));
+        } else if (rightLeg == null) {
+            // An open ending may run on past its last bar: it covers the measures up to that bar
+            rightBar = lookupLastBar(staff, systemBars, profile);
+
+            if (rightBar != null) {
+                final EndingBarRelation rightRel = new EndingBarRelation(RIGHT);
+                rightRel.setInOutGaps(0, 0, profile);
+
+                links.add(new Link(rightBar, rightRel, true));
+            }
         }
 
         return links;
