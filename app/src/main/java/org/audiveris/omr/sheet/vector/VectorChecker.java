@@ -141,6 +141,21 @@ public abstract class VectorChecker
                 inter.remove();
                 continue;
             }
+            // A staccato read where a full font draws no dot at all is not there either, whatever
+            // the trust in dots, which augmentation dots read off their place may spoil
+            if (!same && (kind == Kind.STACCATO) && vectorSymbols.isFullFont() && !isConfused(
+                    vectorSymbols,
+                    inter,
+                    kind,
+                    margin)) {
+                if (inter.isVip()) {
+                    logger.info("VIP {} not drawn by the PDF", inter);
+                }
+
+                inter.remove();
+                continue;
+            }
+
             final Map<Category, List<Inter>> verdict = same ? confirmed
                     : ((kind.category == Category.DOT)
                             && isConfused(vectorSymbols, inter, kind, margin)) ? confused
@@ -161,10 +176,14 @@ public abstract class VectorChecker
             final List<Inter> bad = new ArrayList<>(
                     rejected.getOrDefault(category, Collections.emptyList()));
 
-            // A fermata is rare, and most read ones may be false: the font tells it is not there
-            final boolean trusted = (category == Category.FERMATA) ? vectorSymbols.isKnownFont()
-                    : (good.size() >= constants.minAgreement.getValue() * (good.size() + bad
-                            .size()));
+            // A fermata is rare, and most read ones may be false: the font tells it is not there.
+            // So does it for the articulations of a font whose articulations we read
+            final boolean trusted = switch (category) {
+                case FERMATA -> vectorSymbols.isKnownFont();
+                case ARTICULATION -> vectorSymbols.isFullFont();
+                default -> good.size() >= constants.minAgreement.getValue() * (good.size() + bad
+                        .size());
+            };
 
             if (!trusted) {
                 continue;
@@ -889,6 +908,10 @@ public abstract class VectorChecker
             case ONE_32ND_REST -> Kind.REST_32ND;
             case ONE_64TH_REST -> Kind.REST_64TH;
             case FERMATA, FERMATA_BELOW -> Kind.FERMATA;
+            case ACCENT -> Kind.ACCENT;
+            case TENUTO -> Kind.TENUTO;
+            case STACCATISSIMO, STACCATISSIMO_BELOW -> Kind.STACCATISSIMO;
+            case MARCATO, MARCATO_BELOW, STRONG_ACCENT -> Kind.STRONG_ACCENT;
             default -> null;
         };
     }
