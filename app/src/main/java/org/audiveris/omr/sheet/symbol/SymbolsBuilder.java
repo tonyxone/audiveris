@@ -44,6 +44,7 @@ import org.audiveris.omr.sheet.vector.VectorSymbols;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.ClefInter;
 import org.audiveris.omr.sig.inter.DynamicsInter;
+import org.audiveris.omr.sig.inter.FermataInter;
 import org.audiveris.omr.sig.inter.FlagInter;
 import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
@@ -194,6 +195,9 @@ public class SymbolsBuilder
 
         watch.start("checkDrawnDynamics");
         checkDrawnDynamics();
+
+        watch.start("addDrawnFermatas");
+        addDrawnFermatas();
 
         if (constants.printWatch.isSet()) {
             watch.print();
@@ -363,6 +367,48 @@ public class SymbolsBuilder
 
             if (tuplet != null) {
                 logger.debug("{} read from the PDF", tuplet);
+            }
+        }
+    }
+
+    //------------------//
+    // addDrawnFermatas //
+    //------------------//
+    /**
+     * Propose the fermatas a PDF draws where none was read: the arc and its dot, close to a
+     * note or a barline, are often taken for something else.
+     */
+    private void addDrawnFermatas ()
+    {
+        final int margin = sheet.getInterline() / 2;
+
+        for (Glyph glyph : VectorChecker.drawnFermatas(system)) {
+            final Rectangle around = glyph.getBounds();
+            around.grow(margin, margin);
+
+            if (system.getSig().inters(FermataInter.class).stream().anyMatch(f -> f.getBounds()
+                    .intersects(around))) {
+                continue;
+            }
+
+            final Point2D center = glyph.getCenter2D();
+            final Staff staff = system.getClosestStaff(center);
+
+            if (staff == null) {
+                continue;
+            }
+
+            // Above its staff, the arc opens down; below, it opens up
+            final Shape shape = (center.getY() < staff.getMidLine().yAt(center.getX()))
+                    ? Shape.FERMATA
+                    : Shape.FERMATA_BELOW;
+            final Inter fermata = factory.create(
+                    new Evaluation(shape, constants.drawnFermataGrade.getValue()),
+                    glyph,
+                    staff);
+
+            if (fermata != null) {
+                logger.debug("{} read from the PDF", fermata);
             }
         }
     }
@@ -804,6 +850,10 @@ public class SymbolsBuilder
         private final Constant.Ratio drawnOrnamentGrade = new Constant.Ratio(
                 0.8,
                 "Grade given to an ornament that the PDF draws");
+
+        private final Constant.Ratio drawnFermataGrade = new Constant.Ratio(
+                0.8,
+                "Grade given to a fermata that the PDF draws");
 
         private final Constant.Ratio drawnDynamicsGrade = new Constant.Ratio(
                 0.8,
