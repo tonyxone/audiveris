@@ -719,6 +719,21 @@ public abstract class VectorChecker
         return vectorSymbols.intersected(Category.TUPLET, around).isEmpty();
     }
 
+    //-------------//
+    // drawnPedals //
+    //-------------//
+    /**
+     * Report the pedal marks the PDF draws in a system, each as a glyph of the black pixels
+     * within it, with its kind.
+     *
+     * @param system the system to process
+     * @return the glyphs of the drawn pedal marks, with their kind
+     */
+    public static Map<Glyph, Kind> drawnPedals (SystemInfo system)
+    {
+        return drawnGlyphs(system, Category.PEDAL);
+    }
+
     //---------------//
     // drawnFermatas //
     //---------------//
