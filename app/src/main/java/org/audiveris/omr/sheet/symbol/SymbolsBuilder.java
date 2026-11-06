@@ -390,13 +390,7 @@ public class SymbolsBuilder
                 continue;
             }
 
-            final Shape shape = switch (entry.getValue()) {
-                case TRILL -> Shape.TR;
-                case PRALL -> Shape.MORDENT_INVERTED;
-                case MORDENT -> Shape.MORDENT;
-                case TURN -> Shape.TURN;
-                default -> Shape.TURN_INVERTED;
-            };
+            final Shape shape = VectorChecker.ornamentShape(entry.getValue());
             final Inter ornament = factory.create(
                     new Evaluation(shape, constants.drawnOrnamentGrade.getValue()),
                     glyph,

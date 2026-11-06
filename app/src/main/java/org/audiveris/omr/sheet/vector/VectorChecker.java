@@ -681,6 +681,30 @@ public abstract class VectorChecker
         return drawnGlyphs(system, Category.ORNAMENT);
     }
 
+    //---------------//
+    // ornamentShape //
+    //---------------//
+    /**
+     * Report the shape of a drawn ornament.
+     * <p>
+     * The export writes MORDENT as the inverted-mordent of MusicXML, a short trill with no
+     * line, and MORDENT_INVERTED as its mordent, crossed by a line: a short trill, the prall
+     * of LilyPond, is thus a MORDENT.
+     *
+     * @param kind the kind of drawn ornament
+     * @return its shape
+     */
+    public static Shape ornamentShape (Kind kind)
+    {
+        return switch (kind) {
+            case TRILL -> Shape.TR;
+            case PRALL -> Shape.MORDENT;
+            case MORDENT -> Shape.MORDENT_INVERTED;
+            case TURN -> Shape.TURN;
+            default -> Shape.TURN_INVERTED;
+        };
+    }
+
     //--------------//
     // missedGlyphs //
     //--------------//
