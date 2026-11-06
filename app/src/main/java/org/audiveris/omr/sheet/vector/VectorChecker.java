@@ -691,6 +691,34 @@ public abstract class VectorChecker
         return drawnGlyphs(system, Category.TUPLET);
     }
 
+    //------------------//
+    // isUndrawnTuplet //
+    //------------------//
+    /**
+     * Tell whether a tuplet sign was read far from any tuplet number a LilyPond page draws:
+     * such a page writes them as lone italic digits, all read, and a sign read away from them
+     * is a piece of a word or of another symbol. One read near a drawn number may stand for
+     * it, a bit off its place.
+     *
+     * @param tuplet the tuplet sign read
+     * @return true if so
+     */
+    public static boolean isUndrawnTuplet (Inter tuplet)
+    {
+        final Sheet sheet = tuplet.getSig().getSystem().getSheet();
+        final VectorSymbols vectorSymbols = VectorSymbols.of(sheet);
+
+        if (!vectorSymbols.isLilyPond()) {
+            return false;
+        }
+
+        final Rectangle around = tuplet.getBounds();
+        final int reach = sheet.getScale().toPixels(constants.maxTupletOffset);
+        around.grow(reach, reach);
+
+        return vectorSymbols.intersected(Category.TUPLET, around).isEmpty();
+    }
+
     //----------------//
     // drawnOrnaments //
     //----------------//
@@ -704,6 +732,54 @@ public abstract class VectorChecker
     public static Map<Glyph, Kind> drawnOrnaments (SystemInfo system)
     {
         return drawnGlyphs(system, Category.ORNAMENT);
+    }
+
+    //---------------//
+    // drawnDynamics //
+    //---------------//
+    /**
+     * Report the dynamics the PDF draws in a system, as LilyPond and SMuFL fonts draw them
+     * letter by letter: for each, its letters and a glyph of the black pixels within it.
+     *
+     * @param system the system to process
+     * @return the glyph of each drawn dynamic, with its letters, perhaps empty
+     */
+    public static Map<Glyph, String> drawnDynamics (SystemInfo system)
+    {
+        final Sheet sheet = system.getSheet();
+        final VectorSymbols vectorSymbols = VectorSymbols.of(sheet);
+        final Map<Glyph, String> glyphs = new LinkedHashMap<>();
+
+        if (vectorSymbols.isEmpty()) {
+            return glyphs;
+        }
+
+        final ByteProcessor binary = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
+        final Rectangle image = new Rectangle(0, 0, binary.getWidth(), binary.getHeight());
+
+        for (Map.Entry<String, Rectangle2D> word : vectorSymbols.dynamicWords(system
+                .getBounds())) {
+            final Rectangle2D bounds = word.getValue();
+            final Rectangle roi = bounds.getBounds().intersection(image);
+
+            if (roi.isEmpty() || !system.getArea().contains(bounds.getCenterX(), bounds
+                    .getCenterY())) {
+                continue;
+            }
+
+            final Point offset = new Point();
+            final RunTable table = new RunTableFactory(VERTICAL).createTable(binary, roi).trim(
+                    offset);
+
+            if (table.getWeight() > 0) {
+                glyphs.put(
+                        sheet.getGlyphIndex().registerOriginal(
+                                new Glyph(roi.x + offset.x, roi.y + offset.y, table)),
+                        word.getKey());
+            }
+        }
+
+        return glyphs;
     }
 
     //---------------//
@@ -952,6 +1028,10 @@ public abstract class VectorChecker
         private final Scale.Fraction minTimeDigitHeight = new Scale.Fraction(
                 1.5,
                 "Minimum height of a time signature digit drawn by the PDF");
+
+        private final Scale.Fraction maxTupletOffset = new Scale.Fraction(
+                2.0,
+                "Maximum distance from a tuplet sign read to the number a LilyPond page draws");
 
         private final Constant.Ratio minAgreement = new Constant.Ratio(
                 0.7,

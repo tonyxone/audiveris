@@ -50,6 +50,7 @@ import java.nio.charset.CharsetEncoder;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
@@ -82,6 +83,7 @@ public class VectorSymbols
     private static final VectorSymbols EMPTY = new VectorSymbols(
             Collections.emptyList(),
             false,
+            false,
             false);
 
     /** The symbols of each sheet, extracted once. */
@@ -96,6 +98,19 @@ public class VectorSymbols
 
     /** The Mac Roman bytes of the symbols we use, in the Sonata layout. */
     private static final Map<Integer, Kind> SONATA = new HashMap<>();
+
+    /** The letters of the SMuFL dynamics drawn as one glyph. */
+    private static final Map<Character, String> SMUFL_DYNAMICS = Map.ofEntries(
+            Map.entry((char) 0xE52A, "ppp"),
+            Map.entry((char) 0xE52B, "pp"),
+            Map.entry((char) 0xE52C, "mp"),
+            Map.entry((char) 0xE52D, "mf"),
+            Map.entry((char) 0xE52F, "ff"),
+            Map.entry((char) 0xE530, "fff"),
+            Map.entry((char) 0xE534, "fp"),
+            Map.entry((char) 0xE535, "fz"),
+            Map.entry((char) 0xE536, "sf"),
+            Map.entry((char) 0xE539, "sfz"));
 
     /** The glyph names of the symbols we use, in the Emmentaler font of LilyPond. */
     private static final Map<String, Kind> EMMENTALER = new HashMap<>();
@@ -151,6 +166,12 @@ public class VectorSymbols
                 "scripts.dhenzeshortfermata",
                 "scripts.uhenzelongfermata",
                 "scripts.dhenzelongfermata");
+        emmentaler(Kind.DYNAMIC_P, "p");
+        emmentaler(Kind.DYNAMIC_M, "m");
+        emmentaler(Kind.DYNAMIC_F, "f");
+        emmentaler(Kind.DYNAMIC_R, "r");
+        emmentaler(Kind.DYNAMIC_S, "s");
+        emmentaler(Kind.DYNAMIC_Z, "z");
         emmentaler(Kind.ACCENT, "scripts.sforzato");
         emmentaler(Kind.TENUTO, "scripts.tenuto");
         emmentaler(
@@ -210,6 +231,12 @@ public class VectorSymbols
         smufl(Kind.REST_64TH, 0xE4E9);
         smufl(Kind.FERMATA, 0xE4C0, 0xE4C1, 0xE4C2, 0xE4C3, 0xE4C4, 0xE4C5, 0xE4C6, 0xE4C7,
               0xE4C8, 0xE4C9, 0xE4CA, 0xE4CB, 0xE4CC, 0xE4CD, 0xE4CE, 0xE4CF);
+        smufl(Kind.DYNAMIC_P, 0xE520);
+        smufl(Kind.DYNAMIC_M, 0xE521);
+        smufl(Kind.DYNAMIC_F, 0xE522);
+        smufl(Kind.DYNAMIC_R, 0xE523);
+        smufl(Kind.DYNAMIC_S, 0xE524);
+        smufl(Kind.DYNAMIC_Z, 0xE525);
         smufl(Kind.ACCENT, 0xE4A0, 0xE4A1);
         smufl(Kind.TENUTO, 0xE4A4, 0xE4A5);
         smufl(Kind.STACCATISSIMO, 0xE4A6, 0xE4A7, 0xE4A8, 0xE4A9, 0xE4AA, 0xE4AB);
@@ -272,7 +299,8 @@ public class VectorSymbols
         TUPLET,
         ORNAMENT,
         FERMATA,
-        ARTICULATION;
+        ARTICULATION,
+        DYNAMICS;
     }
 
     /** The symbols we read. */
@@ -339,7 +367,17 @@ public class VectorSymbols
         ACCENT(Category.ARTICULATION),
         TENUTO(Category.ARTICULATION),
         STACCATISSIMO(Category.ARTICULATION),
-        STRONG_ACCENT(Category.ARTICULATION);
+        STRONG_ACCENT(Category.ARTICULATION),
+        /** The letters of a dynamic, as LilyPond and SMuFL draw them one by one. */
+        DYNAMIC_P(Category.DYNAMICS),
+        DYNAMIC_M(Category.DYNAMICS),
+        DYNAMIC_F(Category.DYNAMICS),
+        DYNAMIC_R(Category.DYNAMICS),
+        DYNAMIC_S(Category.DYNAMICS),
+        DYNAMIC_Z(Category.DYNAMICS);
+
+        /** The letters of the dynamic kinds, in their order. */
+        private static final String DYNAMIC_LETTERS = "pmfrsz";
 
         public final Category category;
 
@@ -368,12 +406,17 @@ public class VectorSymbols
     /** Whether the heads are drawn with Emmentaler or SMuFL, whose articulations we read. */
     private final boolean fullFont;
 
+    /** Whether the heads are drawn with Emmentaler, as LilyPond does. */
+    private final boolean lilyPond;
+
     private VectorSymbols (List<Symbol> all,
                            boolean knownFont,
-                           boolean fullFont)
+                           boolean fullFont,
+                           boolean lilyPond)
     {
         this.knownFont = knownFont;
         this.fullFont = fullFont;
+        this.lilyPond = lilyPond;
 
         // A head is small (cue or grace) when clearly shorter than the usual heads of the page,
         // measured high in the range since small heads can make most of a page (a cadenza)
@@ -428,6 +471,75 @@ public class VectorSymbols
     public boolean isKnownFont ()
     {
         return knownFont;
+    }
+
+    //--------------//
+    // dynamicWords //
+    //--------------//
+    /**
+     * Report the dynamics the page draws within an area, each as its letters and their bounds:
+     * letters in a row, each close to the previous one, make a word, such as "sfz".
+     *
+     * @param area the area to look into, in sheet pixels
+     * @return the words, perhaps empty
+     */
+    public List<Map.Entry<String, Rectangle2D>> dynamicWords (Rectangle2D area)
+    {
+        final List<Symbol> letters = new ArrayList<>(intersected(Category.DYNAMICS, area));
+        letters.sort(Comparator.comparingDouble(s -> s.bounds.getX()));
+
+        final List<Map.Entry<String, Rectangle2D>> words = new ArrayList<>();
+        final List<StringBuilder> texts = new ArrayList<>();
+        final List<Rectangle2D> boxes = new ArrayList<>();
+
+        for (Symbol letter : letters) {
+            final Rectangle2D b = letter.bounds;
+            final char c = Kind.DYNAMIC_LETTERS.charAt(letter.kind.ordinal() - Kind.DYNAMIC_P
+                    .ordinal());
+            int found = -1;
+
+            for (int i = 0; i < boxes.size(); i++) {
+                final Rectangle2D w = boxes.get(i);
+
+                // Letters overlap vertically, though an 'f' goes below the line and a 'z' not
+                final double overlap = Math.min(w.getMaxY(), b.getMaxY()) - Math.max(
+                        w.getY(),
+                        b.getY());
+
+                if ((overlap > 0.3 * Math.min(w.getHeight(), b.getHeight())) && ((b.getX() - w
+                        .getMaxX()) < 0.5 * b.getHeight()) && (b.getX() >= w.getCenterX())) {
+                    found = i;
+                }
+            }
+
+            if (found < 0) {
+                texts.add(new StringBuilder().append(c));
+                boxes.add((Rectangle2D) b.clone());
+            } else {
+                texts.get(found).append(c);
+                boxes.get(found).add(b);
+            }
+        }
+
+        for (int i = 0; i < boxes.size(); i++) {
+            words.add(Map.entry(texts.get(i).toString(), boxes.get(i)));
+        }
+
+        return words;
+    }
+
+    //------------//
+    // isLilyPond //
+    //------------//
+    /**
+     * Tell whether the page draws its heads with Emmentaler, as LilyPond does: it writes the
+     * number of a tuplet as a lone italic digit, read as a tuplet symbol.
+     *
+     * @return true if so
+     */
+    public boolean isLilyPond ()
+    {
+        return lilyPond;
     }
 
     //------------//
@@ -503,7 +615,11 @@ public class VectorSymbols
             collector.getText(doc);
 
             final VectorSymbols vectorSymbols = collector.symbols.isEmpty() ? EMPTY
-                    : new VectorSymbols(collector.symbols, collector.knownFont, collector.fullFont);
+                    : new VectorSymbols(
+                            collector.symbols,
+                            collector.knownFont,
+                            collector.fullFont,
+                            collector.lilyPond);
             logger.info("{}", vectorSymbols);
 
             return vectorSymbols;
@@ -550,7 +666,8 @@ public class VectorSymbols
         if ((font.getName() != null) && font.getName().contains("feta-alphabet")) {
             final Kind kind = EMMENTALER.get(simple.getEncoding().getName(code));
 
-            return ((kind != null) && (kind.category == Category.TIME)) ? kind : null;
+            return ((kind != null) && ((kind.category == Category.TIME)
+                    || (kind.category == Category.DYNAMICS))) ? kind : null;
         }
 
         return null;
@@ -705,6 +822,9 @@ public class VectorSymbols
         /** Whether some heads are drawn with Emmentaler or a SMuFL font. */
         private boolean fullFont;
 
+        /** Whether some heads are drawn with Emmentaler. */
+        private boolean lilyPond;
+
         /** The characters drawn in a row so far, that may make an octave sign. */
         private final StringBuilder octave = new StringBuilder();
 
@@ -747,7 +867,7 @@ public class VectorSymbols
 
             if ((kind != null) && (kind.category == Category.TIME)) {
                 c = (char) ('0' + kind.digit());
-            } else if (!isEmmentaler(font)) {
+            } else if ((kind == null) && !isEmmentaler(font)) {
                 final String unicode = font.toUnicode(code);
 
                 if ((unicode != null) && (unicode.length() == 1)) {
@@ -762,6 +882,27 @@ public class VectorSymbols
 
             trackOctave(c, bounds, font);
 
+            // A SMuFL dynamic of several letters is one glyph: its letters share its width
+            final String letters = (c != null) ? SMUFL_DYNAMICS.get(c) : null;
+
+            if (letters != null) {
+                final double w = bounds.getWidth() / letters.length();
+
+                for (int i = 0; i < letters.length(); i++) {
+                    symbols.add(new Symbol(
+                            Kind.values()[Kind.DYNAMIC_P.ordinal() + Kind.DYNAMIC_LETTERS.indexOf(
+                                    letters.charAt(i))],
+                            new Rectangle2D.Double(
+                                    bounds.getX() + i * w,
+                                    bounds.getY(),
+                                    w,
+                                    bounds.getHeight()),
+                            false));
+                }
+
+                return;
+            }
+
             if (kind != null) {
                 symbols.add(new Symbol(kind, bounds, false));
 
@@ -769,6 +910,7 @@ public class VectorSymbols
                     final boolean full = isEmmentaler(font) || ((c != null) && SMUFL.containsKey(
                             c));
                     fullFont |= full;
+                    lilyPond |= isEmmentaler(font);
                     knownFont |= full || ((c != null) && OLD_MSCORE.containsKey(c));
                 }
             }
@@ -822,9 +964,12 @@ public class VectorSymbols
                                   Rectangle2D bounds,
                                   PDFont font)
         {
-            final boolean near = (octave.length() > 0) && (bounds.getMinX() - octaveRight
-                    < octaveValue.getHeight()) && (Math.abs(bounds.getMaxY() - octaveValue
-                            .getMaxY()) < (0.5 * octaveValue.getHeight()));
+            // The next character of a row stands right after the previous one: LilyPond may draw
+            // the numbers of a row of tuplets from right to left
+            final double gap = bounds.getMinX() - octaveRight;
+            final boolean near = (octave.length() > 0) && (gap > -0.5 * octaveValue.getWidth())
+                    && (gap < octaveValue.getHeight()) && (Math.abs(bounds.getMaxY()
+                            - octaveValue.getMaxY()) < (0.5 * octaveValue.getHeight()));
 
             if ((c != null) && Character.isDigit(c)) {
                 if (near && octave.chars().allMatch(Character::isDigit)) {
