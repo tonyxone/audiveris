@@ -49,6 +49,7 @@ import org.audiveris.omr.sig.inter.FlagInter;
 import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.OrnamentInter;
+import org.audiveris.omr.sig.inter.PedalInter;
 import org.audiveris.omr.sig.inter.SmallChordInter;
 import org.audiveris.omr.sig.inter.StemInter;
 import org.audiveris.omr.sig.inter.TupletInter;
@@ -198,6 +199,9 @@ public class SymbolsBuilder
 
         watch.start("addDrawnFermatas");
         addDrawnFermatas();
+
+        watch.start("addDrawnPedals");
+        addDrawnPedals();
 
         if (constants.printWatch.isSet()) {
             watch.print();
@@ -367,6 +371,60 @@ public class SymbolsBuilder
 
             if (tuplet != null) {
                 logger.debug("{} read from the PDF", tuplet);
+            }
+        }
+    }
+
+    //----------------//
+    // addDrawnPedals //
+    //----------------//
+    /**
+     * Propose the pedal marks a PDF draws where none was read, and give a mark read as the
+     * other one the drawn shape: a "Ped." missed, or taken for the asterisk that releases the
+     * pedal, leaves a whole passage played without it.
+     */
+    private void addDrawnPedals ()
+    {
+        for (Map.Entry<Glyph, VectorSymbols.Kind> entry : VectorChecker.drawnPedals(system)
+                .entrySet()) {
+            final Glyph glyph = entry.getKey();
+            final Rectangle box = glyph.getBounds();
+            final Shape shape = (entry.getValue() == VectorSymbols.Kind.PEDAL_DOWN)
+                    ? Shape.PEDAL_MARK
+                    : Shape.PEDAL_UP_MARK;
+            final List<Inter> there = system.getSig().inters(PedalInter.class).stream().filter(
+                    p -> p.getBounds().intersects(box)).toList();
+
+            // One read there is confirmed: a weak one is purged otherwise
+            final List<Inter> right = there.stream().filter(p -> p.getShape() == shape)
+                    .toList();
+
+            if (!right.isEmpty()) {
+                for (Inter p : right) {
+                    p.setGrade(Math.max(p.getGrade(), constants.drawnPedalGrade.getValue()));
+                }
+
+                continue;
+            }
+
+            for (Inter wrong : there) {
+                logger.debug("{} drawn as {}", wrong, shape);
+                wrong.remove();
+            }
+
+            final Staff staff = system.getClosestStaff(glyph.getCenter2D());
+
+            if (staff == null) {
+                continue;
+            }
+
+            final Inter pedal = factory.create(
+                    new Evaluation(shape, constants.drawnPedalGrade.getValue()),
+                    glyph,
+                    staff);
+
+            if (pedal != null) {
+                logger.debug("{} read from the PDF", pedal);
             }
         }
     }
@@ -850,6 +908,10 @@ public class SymbolsBuilder
         private final Constant.Ratio drawnOrnamentGrade = new Constant.Ratio(
                 0.8,
                 "Grade given to an ornament that the PDF draws");
+
+        private final Constant.Ratio drawnPedalGrade = new Constant.Ratio(
+                0.8,
+                "Grade given to a pedal mark that the PDF draws");
 
         private final Constant.Ratio drawnFermataGrade = new Constant.Ratio(
                 0.8,

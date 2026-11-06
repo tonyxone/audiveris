@@ -166,6 +166,8 @@ public class VectorSymbols
                 "scripts.dhenzeshortfermata",
                 "scripts.uhenzelongfermata",
                 "scripts.dhenzelongfermata");
+        emmentaler(Kind.PEDAL_DOWN, "pedal.Ped");
+        emmentaler(Kind.PEDAL_UP, "pedal.*");
         emmentaler(Kind.DYNAMIC_P, "p");
         emmentaler(Kind.DYNAMIC_M, "m");
         emmentaler(Kind.DYNAMIC_F, "f");
@@ -231,6 +233,8 @@ public class VectorSymbols
         smufl(Kind.REST_64TH, 0xE4E9);
         smufl(Kind.FERMATA, 0xE4C0, 0xE4C1, 0xE4C2, 0xE4C3, 0xE4C4, 0xE4C5, 0xE4C6, 0xE4C7,
               0xE4C8, 0xE4C9, 0xE4CA, 0xE4CB, 0xE4CC, 0xE4CD, 0xE4CE, 0xE4CF);
+        smufl(Kind.PEDAL_DOWN, 0xE650);
+        smufl(Kind.PEDAL_UP, 0xE655);
         smufl(Kind.DYNAMIC_P, 0xE520);
         smufl(Kind.DYNAMIC_M, 0xE521);
         smufl(Kind.DYNAMIC_F, 0xE522);
@@ -300,7 +304,8 @@ public class VectorSymbols
         ORNAMENT,
         FERMATA,
         ARTICULATION,
-        DYNAMICS;
+        DYNAMICS,
+        PEDAL;
     }
 
     /** The symbols we read. */
@@ -374,7 +379,10 @@ public class VectorSymbols
         DYNAMIC_F(Category.DYNAMICS),
         DYNAMIC_R(Category.DYNAMICS),
         DYNAMIC_S(Category.DYNAMICS),
-        DYNAMIC_Z(Category.DYNAMICS);
+        DYNAMIC_Z(Category.DYNAMICS),
+        /** The "Ped." and the asterisk of a piano pedal. */
+        PEDAL_DOWN(Category.PEDAL),
+        PEDAL_UP(Category.PEDAL);
 
         /** The letters of the dynamic kinds, in their order. */
         private static final String DYNAMIC_LETTERS = "pmfrsz";
