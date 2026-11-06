@@ -30,6 +30,7 @@ import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.rhythm.MeasureStack;
 import org.audiveris.omr.sheet.rhythm.TupletsBuilder;
 import org.audiveris.omr.sheet.vector.VectorChecker;
+import org.audiveris.omr.sheet.vector.VectorSymbols;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.AbstractChordInter;
 import org.audiveris.omr.sig.inter.AlterInter;
@@ -39,10 +40,12 @@ import org.audiveris.omr.sig.inter.FermataInter;
 import org.audiveris.omr.sig.inter.HeadChordInter;
 import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
+import org.audiveris.omr.sig.inter.Inters;
 import org.audiveris.omr.sig.inter.KeyAlterInter;
 import org.audiveris.omr.sig.inter.KeyInter;
 import org.audiveris.omr.sig.inter.NumberInter;
 import org.audiveris.omr.sig.inter.OctaveShiftInter;
+import org.audiveris.omr.sig.inter.OrnamentInter;
 import org.audiveris.omr.sig.inter.PedalInter;
 import org.audiveris.omr.sig.inter.SentenceInter;
 import org.audiveris.omr.sig.inter.SlurInter;
@@ -64,7 +67,9 @@ import java.awt.Rectangle;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Class <code>SymbolsLinker</code> defines final relations between certain symbols.
@@ -381,10 +386,71 @@ public class SymbolsLinker
         linkTuplets();
         linkOctaveShifts();
         linkNumbers();
+        linkDrawnOrnaments();
 
         // Check for any key signature change (before "abnormal" alters are removed)
         addMissedAlters();
         KeyInter.lookupCandidates(system);
+    }
+
+    //--------------------//
+    // linkDrawnOrnaments //
+    //--------------------//
+    /**
+     * Make sure of the ornaments a vector PDF draws. One not read yet is proposed again, now
+     * that the chords are known, since a misread symbol may have stood in its way. And a slur
+     * that crosses one, as a slur over a short trill often does, is kept from excluding it.
+     */
+    private void linkDrawnOrnaments ()
+    {
+        final int margin = system.getSheet().getInterline() / 2;
+        final List<Inter> headChords = sig.inters(HeadChordInter.class);
+        Collections.sort(headChords, Inters.byAbscissa);
+
+        for (Map.Entry<Glyph, VectorSymbols.Kind> entry : VectorChecker.drawnOrnaments(system)
+                .entrySet()) {
+            final Glyph glyph = entry.getKey();
+            final Rectangle around = glyph.getBounds();
+            around.grow(margin, margin);
+
+            final List<Inter> ornaments = new ArrayList<>(sig.inters(OrnamentInter.class)
+                    .stream().filter(o -> o.getBounds().intersects(around)).toList());
+
+            if (ornaments.isEmpty()) {
+                final OrnamentInter ornament = OrnamentInter.createValidAdded(
+                        glyph,
+                        VectorChecker.ornamentShape(entry.getValue()),
+                        constants.drawnOrnamentGrade.getValue(),
+                        system,
+                        headChords);
+
+                if (ornament == null) {
+                    continue;
+                }
+
+                logger.debug("{} read from the PDF", ornament);
+                ornaments.add(ornament);
+            }
+
+            for (Inter ornament : ornaments) {
+                ornament.setGrade(Math.max(ornament.getGrade(), constants.drawnOrnamentGrade
+                        .getValue()));
+
+                for (Inter slur : sig.inters(SlurInter.class)) {
+                    if (slur.getBounds().intersects(ornament.getBounds())) {
+                        Relation exclusion;
+
+                        while ((exclusion = sig.getExclusion(ornament, slur)) != null) {
+                            sig.removeEdge(exclusion);
+                        }
+
+                        if (!sig.containsEdge(ornament, slur) && !sig.containsEdge(slur, ornament)) {
+                            sig.addEdge(ornament, slur, new NoExclusion());
+                        }
+                    }
+                }
+            }
+        }
     }
 
     //--------------//
@@ -512,6 +578,10 @@ public class SymbolsLinker
     private static class Constants
             extends ConstantSet
     {
+        private final Constant.Ratio drawnOrnamentGrade = new Constant.Ratio(
+                0.8,
+                "Grade given to an ornament that the PDF draws");
+
         private final Constant.Ratio drawnAlterGrade = new Constant.Ratio(
                 0.8,
                 "Grade of an alter read from the PDF");
