@@ -460,6 +460,18 @@ public class StackRhythm
                 }
             }
 
+            // Five are a quintuplet only where they fill a beat, not two eighths and a triplet of
+            // Chopin's fourth Prelude, and where no triplet could make the measure fit: they would
+            // all be given up together, as the sixteenths of a bar of triplets of his Ballade
+            final Rational simpleBeat = new Rational(1, current.den);
+            groups.removeIf(
+                    group -> (group.size() == 5) && !group.get(0).getDurationSansTuplet().times(4)
+                            .equals(simpleBeat));
+
+            if (groups.stream().anyMatch(group -> group.size() != 5)) {
+                groups.removeIf(group -> group.size() == 5);
+            }
+
             if (!groups.isEmpty()) {
                 forced.put(measure, groups);
                 added = true;
@@ -1199,8 +1211,9 @@ public class StackRhythm
     // plainGroups //
     //-------------//
     /**
-     * The beam groups of a measure that could be unmarked tuplets: 3 or 6 chords, all in
-     * the measure, of equal duration and without a tuplet sign.
+     * The beam groups of a measure that could be unmarked tuplets: 3, 5 or 6 chords, all in
+     * the measure, of equal duration and without a tuplet sign. Five make a quintuplet, as the
+     * five sixteenths that close a run of Beethoven's Pathetique.
      * <p>
      * In a beam group of 4, three chords of equal duration and a fourth of twice it, first or
      * last, the three could make a triplet that, with the fourth, fills a beat: three sixteenths
@@ -1229,7 +1242,7 @@ public class StackRhythm
                 }
             }
 
-            if ((group.size() != 3) && (group.size() != 6)) {
+            if ((group.size() != 3) && (group.size() != 5) && (group.size() != 6)) {
                 continue;
             }
 
