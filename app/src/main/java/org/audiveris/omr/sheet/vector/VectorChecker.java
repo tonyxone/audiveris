@@ -719,6 +719,21 @@ public abstract class VectorChecker
         return vectorSymbols.intersected(Category.TUPLET, around).isEmpty();
     }
 
+    //---------------//
+    // drawnFermatas //
+    //---------------//
+    /**
+     * Report the fermatas the PDF draws in a system, each as a glyph of the black pixels
+     * within it.
+     *
+     * @param system the system to process
+     * @return the glyphs of the drawn fermatas
+     */
+    public static List<Glyph> drawnFermatas (SystemInfo system)
+    {
+        return new ArrayList<>(drawnGlyphs(system, Category.FERMATA).keySet());
+    }
+
     //----------------//
     // drawnOrnaments //
     //----------------//
