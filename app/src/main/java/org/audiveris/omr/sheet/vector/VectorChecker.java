@@ -40,6 +40,7 @@ import org.audiveris.omr.sig.inter.AlterInter;
 import org.audiveris.omr.sig.inter.ArticulationInter;
 import org.audiveris.omr.sig.inter.AugmentationDotInter;
 import org.audiveris.omr.sig.inter.ClefInter;
+import org.audiveris.omr.sig.inter.FermataInter;
 import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.KeyAlterInter;
@@ -160,7 +161,12 @@ public abstract class VectorChecker
             final List<Inter> bad = new ArrayList<>(
                     rejected.getOrDefault(category, Collections.emptyList()));
 
-            if (good.size() < constants.minAgreement.getValue() * (good.size() + bad.size())) {
+            // A fermata is rare, and most read ones may be false: the font tells it is not there
+            final boolean trusted = (category == Category.FERMATA) ? vectorSymbols.isKnownFont()
+                    : (good.size() >= constants.minAgreement.getValue() * (good.size() + bad
+                            .size()));
+
+            if (!trusted) {
                 continue;
             }
 
@@ -801,7 +807,7 @@ public abstract class VectorChecker
     // checkSymbols //
     //--------------//
     /**
-     * Check the clefs, accidentals, dots and rests of a system against the PDF.
+     * Check the clefs, accidentals, dots, rests and fermatas of a system against the PDF.
      * Small heads read on an accidental the PDF draws, such as the halves of a sharp, go first:
      * they came after the heads were checked.
      *
@@ -830,6 +836,7 @@ public abstract class VectorChecker
         inters.addAll(system.getSig().inters(AugmentationDotInter.class));
         inters.addAll(system.getSig().inters(ArticulationInter.class));
         inters.addAll(system.getSig().inters(RestInter.class));
+        inters.addAll(system.getSig().inters(FermataInter.class));
         check(system, inters);
     }
 
@@ -881,6 +888,7 @@ public abstract class VectorChecker
             case ONE_16TH_REST -> Kind.REST_16TH;
             case ONE_32ND_REST -> Kind.REST_32ND;
             case ONE_64TH_REST -> Kind.REST_64TH;
+            case FERMATA, FERMATA_BELOW -> Kind.FERMATA;
             default -> null;
         };
     }

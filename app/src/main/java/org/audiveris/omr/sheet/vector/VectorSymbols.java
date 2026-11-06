@@ -79,7 +79,7 @@ public class VectorSymbols
     private static final Logger logger = LoggerFactory.getLogger(VectorSymbols.class);
 
     /** No symbols, for a page that is not a vector PDF page. */
-    private static final VectorSymbols EMPTY = new VectorSymbols(Collections.emptyList());
+    private static final VectorSymbols EMPTY = new VectorSymbols(Collections.emptyList(), false);
 
     /** The symbols of each sheet, extracted once. */
     private static final Map<SheetStub, VectorSymbols> cache = Collections.synchronizedMap(
@@ -132,6 +132,22 @@ public class VectorSymbols
         emmentaler(Kind.REST_16TH, "rests.4");
         emmentaler(Kind.REST_32ND, "rests.5");
         emmentaler(Kind.REST_64TH, "rests.6");
+        emmentaler(
+                Kind.FERMATA,
+                "scripts.ufermata",
+                "scripts.dfermata",
+                "scripts.ushortfermata",
+                "scripts.dshortfermata",
+                "scripts.ulongfermata",
+                "scripts.dlongfermata",
+                "scripts.uverylongfermata",
+                "scripts.dverylongfermata",
+                "scripts.uveryshortfermata",
+                "scripts.dveryshortfermata",
+                "scripts.uhenzeshortfermata",
+                "scripts.dhenzeshortfermata",
+                "scripts.uhenzelongfermata",
+                "scripts.dhenzelongfermata");
         emmentaler(Kind.TRILL, "scripts.trill");
         emmentaler(Kind.PRALL, "scripts.prall");
         emmentaler(Kind.MORDENT, "scripts.mordent");
@@ -181,6 +197,8 @@ public class VectorSymbols
         smufl(Kind.REST_16TH, 0xE4E7);
         smufl(Kind.REST_32ND, 0xE4E8);
         smufl(Kind.REST_64TH, 0xE4E9);
+        smufl(Kind.FERMATA, 0xE4C0, 0xE4C1, 0xE4C2, 0xE4C3, 0xE4C4, 0xE4C5, 0xE4C6, 0xE4C7,
+              0xE4C8, 0xE4C9, 0xE4CA, 0xE4CB, 0xE4CC, 0xE4CD, 0xE4CE, 0xE4CF);
         smufl(Kind.TRILL, 0xE566);
         smufl(Kind.TURN, 0xE567);
         smufl(Kind.TURN_INVERTED, 0xE568);
@@ -236,7 +254,8 @@ public class VectorSymbols
         OCTAVE,
         FLAG,
         TUPLET,
-        ORNAMENT;
+        ORNAMENT,
+        FERMATA;
     }
 
     /** The symbols we read. */
@@ -296,7 +315,9 @@ public class VectorSymbols
         PRALL(Category.ORNAMENT),
         MORDENT(Category.ORNAMENT),
         TURN(Category.ORNAMENT),
-        TURN_INVERTED(Category.ORNAMENT);
+        TURN_INVERTED(Category.ORNAMENT),
+        /** A fermata, above or below. */
+        FERMATA(Category.FERMATA);
 
         public final Category category;
 
@@ -319,8 +340,14 @@ public class VectorSymbols
 
     //~ Constructors -------------------------------------------------------------------------------
 
-    private VectorSymbols (List<Symbol> all)
+    /** Whether the heads are drawn with a font of a known layout, Emmentaler or SMuFL. */
+    private final boolean knownFont;
+
+    private VectorSymbols (List<Symbol> all,
+                           boolean knownFont)
     {
+        this.knownFont = knownFont;
+
         // A head is small (cue or grace) when clearly shorter than the usual heads of the page,
         // measured high in the range since small heads can make most of a page (a cadenza)
         final double[] heights = all.stream().filter(s -> s.kind.category == Category.HEAD)
@@ -359,6 +386,20 @@ public class VectorSymbols
         }
 
         return found;
+    }
+
+    //-------------//
+    // isKnownFont //
+    //-------------//
+    /**
+     * Tell whether the page draws its heads with a font of a known layout, Emmentaler or
+     * SMuFL, so that a symbol of that font that the page does not draw is not there.
+     *
+     * @return true if so
+     */
+    public boolean isKnownFont ()
+    {
+        return knownFont;
     }
 
     //---------//
@@ -420,7 +461,7 @@ public class VectorSymbols
             collector.getText(doc);
 
             final VectorSymbols vectorSymbols = collector.symbols.isEmpty() ? EMPTY
-                    : new VectorSymbols(collector.symbols);
+                    : new VectorSymbols(collector.symbols, collector.knownFont);
             logger.info("{}", vectorSymbols);
 
             return vectorSymbols;
@@ -616,6 +657,9 @@ public class VectorSymbols
 
         private final List<Symbol> symbols = new ArrayList<>();
 
+        /** Whether some heads are drawn with Emmentaler or a SMuFL font. */
+        private boolean knownFont;
+
         /** The characters drawn in a row so far, that may make an octave sign. */
         private final StringBuilder octave = new StringBuilder();
 
@@ -675,6 +719,11 @@ public class VectorSymbols
 
             if (kind != null) {
                 symbols.add(new Symbol(kind, bounds, false));
+
+                if ((kind.category == Category.HEAD) && (isEmmentaler(font) || ((c != null)
+                        && SMUFL.containsKey(c)))) {
+                    knownFont = true;
+                }
             }
         }
 
