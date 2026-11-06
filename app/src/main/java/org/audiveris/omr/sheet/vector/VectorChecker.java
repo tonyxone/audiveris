@@ -481,17 +481,7 @@ public abstract class VectorChecker
                 continue;
             }
 
-            final Shape shape = switch (symbol.kind()) {
-                case FLAG_1_UP -> Shape.FLAG_1;
-                case FLAG_1_DOWN -> Shape.FLAG_1_DOWN;
-                case FLAG_2_UP -> Shape.FLAG_2;
-                case FLAG_2_DOWN -> Shape.FLAG_2_DOWN;
-                case FLAG_3_UP -> Shape.FLAG_3;
-                case FLAG_3_DOWN -> Shape.FLAG_3_DOWN;
-                case FLAG_4_UP -> Shape.FLAG_4;
-                case FLAG_4_DOWN -> Shape.FLAG_4_DOWN;
-                default -> null;
-            };
+            final Shape shape = flagShape(symbol.kind());
 
             final ByteProcessor binary = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
             final Rectangle roi = symbol.bounds().getBounds().intersection(box);
@@ -515,6 +505,53 @@ public abstract class VectorChecker
         }
 
         return null;
+    }
+
+    //------------//
+    // drawnFlags //
+    //------------//
+    /**
+     * Report the flags of regular notes the PDF draws in a system, each as a glyph of the black
+     * pixels within it, with its shape.
+     *
+     * @param system the system to process
+     * @return the glyphs of the drawn flags, with their shape
+     */
+    public static Map<Glyph, Shape> drawnFlags (SystemInfo system)
+    {
+        final double minHeight = system.getSheet().getScale().toPixelsDouble(
+                constants.minFlagHeight);
+        final Map<Glyph, Shape> flags = new LinkedHashMap<>();
+
+        // Flags of small notes are drawn smaller: they are left alone
+        for (Map.Entry<Glyph, Kind> entry : drawnGlyphs(system, Category.FLAG).entrySet()) {
+            final Glyph glyph = entry.getKey();
+            final Shape shape = flagShape(entry.getValue());
+
+            if ((shape != null) && (glyph.getHeight() >= minHeight)) {
+                flags.put(glyph, shape);
+            }
+        }
+
+        return flags;
+    }
+
+    //-----------//
+    // flagShape //
+    //-----------//
+    private static Shape flagShape (Kind kind)
+    {
+        return switch (kind) {
+            case FLAG_1_UP -> Shape.FLAG_1;
+            case FLAG_1_DOWN -> Shape.FLAG_1_DOWN;
+            case FLAG_2_UP -> Shape.FLAG_2;
+            case FLAG_2_DOWN -> Shape.FLAG_2_DOWN;
+            case FLAG_3_UP -> Shape.FLAG_3;
+            case FLAG_3_DOWN -> Shape.FLAG_3_DOWN;
+            case FLAG_4_UP -> Shape.FLAG_4;
+            case FLAG_4_DOWN -> Shape.FLAG_4_DOWN;
+            default -> null;
+        };
     }
 
     //-----------//
