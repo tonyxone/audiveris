@@ -43,12 +43,15 @@ import org.audiveris.omr.sheet.vector.VectorChecker;
 import org.audiveris.omr.sheet.vector.VectorSymbols;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.ClefInter;
+import org.audiveris.omr.sig.inter.DynamicsInter;
 import org.audiveris.omr.sig.inter.FlagInter;
+import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.OrnamentInter;
 import org.audiveris.omr.sig.inter.SmallChordInter;
-import org.audiveris.omr.sig.relation.Exclusion;
+import org.audiveris.omr.sig.inter.StemInter;
 import org.audiveris.omr.sig.inter.TupletInter;
+import org.audiveris.omr.sig.relation.Exclusion;
 import org.audiveris.omr.util.Dumping;
 import org.audiveris.omr.util.Navigable;
 import org.audiveris.omr.util.StopWatch;
@@ -64,8 +67,10 @@ import java.awt.geom.Point2D;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -186,6 +191,9 @@ public class SymbolsBuilder
 
         watch.start("addDrawnOrnaments");
         addDrawnOrnaments();
+
+        watch.start("checkDrawnDynamics");
+        checkDrawnDynamics();
 
         if (constants.printWatch.isSet()) {
             watch.print();
@@ -309,10 +317,14 @@ public class SymbolsBuilder
     {
         final int margin = sheet.getInterline() / 2;
 
-        // A tuplet sign read on a fingering digit the PDF draws is that digit
+        // A tuplet sign read on a fingering digit the PDF draws is that digit, and one read
+        // where LilyPond draws no tuplet number is a piece of something else
         for (Inter tuplet : system.getSig().inters(TupletInter.class)) {
             if (VectorChecker.isOnFingering(tuplet)) {
                 logger.debug("{} is a fingering", tuplet);
+                tuplet.remove();
+            } else if (VectorChecker.isUndrawnTuplet(tuplet)) {
+                logger.debug("{} not drawn by the PDF", tuplet);
                 tuplet.remove();
             }
         }
@@ -352,6 +364,90 @@ public class SymbolsBuilder
             if (tuplet != null) {
                 logger.debug("{} read from the PDF", tuplet);
             }
+        }
+    }
+
+    //--------------------//
+    // checkDrawnDynamics //
+    //--------------------//
+    /**
+     * Check the dynamics against those a PDF draws letter by letter: a dynamic read where none
+     * is drawn goes, one read as another, a "pp" for a "p", say, is read as the drawn one, and
+     * one drawn but not read is proposed. Nothing is done where the PDF draws no dynamic this
+     * way, since it may draw them with a text font.
+     */
+    private void checkDrawnDynamics ()
+    {
+        final Map<Glyph, String> words = VectorChecker.drawnDynamics(system);
+
+        if (words.isEmpty()) {
+            return;
+        }
+
+        final int margin = sheet.getInterline() / 4;
+        final Set<Glyph> read = new HashSet<>();
+
+        for (Inter inter : system.getSig().inters(DynamicsInter.class)) {
+            final Rectangle box = inter.getBounds();
+            box.grow(margin, margin);
+
+            final Glyph word = words.keySet().stream().filter(g -> g.getBounds().intersects(box))
+                    .findFirst().orElse(null);
+
+            if (word == null) {
+                logger.debug("{} not drawn by the PDF", inter);
+                inter.remove();
+                continue;
+            }
+
+            read.add(word);
+
+            final Shape drawn = dynamicsShape(words.get(word));
+
+            if ((drawn != null) && (drawn != inter.getShape()) && (inter.getGlyph() != null)) {
+                logger.debug("{} drawn as {}", inter, drawn);
+                inter.remove();
+                createDynamics(drawn, inter.getGlyph());
+            }
+        }
+
+        // A drawn one not read is proposed, unless its pixels touch a note: they would take
+        // part of the head or stem, and the dynamic could exclude it
+        final List<Inter> notes = system.getSig().inters(HeadInter.class);
+        notes.addAll(system.getSig().inters(StemInter.class));
+
+        for (Map.Entry<Glyph, String> entry : words.entrySet()) {
+            final Shape drawn = dynamicsShape(entry.getValue());
+            final Rectangle box = entry.getKey().getBounds();
+
+            if (!read.contains(entry.getKey()) && (drawn != null) && notes.stream().noneMatch(
+                    n -> n.getBounds().intersects(box))) {
+                createDynamics(drawn, entry.getKey());
+            }
+        }
+    }
+
+    private void createDynamics (Shape shape,
+                                 Glyph glyph)
+    {
+        final Staff staff = system.getClosestStaff(glyph.getCenter2D());
+
+        if (staff != null) {
+            final Inter dynamics = factory.create(
+                    new Evaluation(shape, constants.drawnDynamicsGrade.getValue()),
+                    glyph,
+                    staff);
+            logger.debug("{} read from the PDF", dynamics);
+        }
+    }
+
+    /** The shape of a drawn dynamic, from its letters, or null if not one we handle. */
+    private static Shape dynamicsShape (String letters)
+    {
+        try {
+            return Shape.valueOf("DYNAMICS_" + letters.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            return null;
         }
     }
 
@@ -708,6 +804,10 @@ public class SymbolsBuilder
         private final Constant.Ratio drawnOrnamentGrade = new Constant.Ratio(
                 0.8,
                 "Grade given to an ornament that the PDF draws");
+
+        private final Constant.Ratio drawnDynamicsGrade = new Constant.Ratio(
+                0.8,
+                "Grade given to a dynamic that the PDF draws");
 
         private final Constant.Ratio minFlagGrade = new Constant.Ratio(
                 0.5,
