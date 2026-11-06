@@ -132,6 +132,11 @@ public class VectorSymbols
         emmentaler(Kind.REST_16TH, "rests.4");
         emmentaler(Kind.REST_32ND, "rests.5");
         emmentaler(Kind.REST_64TH, "rests.6");
+        emmentaler(Kind.TRILL, "scripts.trill");
+        emmentaler(Kind.PRALL, "scripts.prall");
+        emmentaler(Kind.MORDENT, "scripts.mordent");
+        emmentaler(Kind.TURN, "scripts.turn");
+        emmentaler(Kind.TURN_INVERTED, "scripts.reverseturn");
 
         final String[] digits = {
                 "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"};
@@ -176,6 +181,11 @@ public class VectorSymbols
         smufl(Kind.REST_16TH, 0xE4E7);
         smufl(Kind.REST_32ND, 0xE4E8);
         smufl(Kind.REST_64TH, 0xE4E9);
+        smufl(Kind.TRILL, 0xE566);
+        smufl(Kind.TURN, 0xE567);
+        smufl(Kind.TURN_INVERTED, 0xE568);
+        smufl(Kind.PRALL, 0xE56C);
+        smufl(Kind.MORDENT, 0xE56D);
 
         // The augmentation dot of MuseScore 2 is a glyph of its own, unlike its staccato
         oldMScore(Kind.HEAD_WHOLE, 0xE12B);
@@ -225,7 +235,8 @@ public class VectorSymbols
         TIME,
         OCTAVE,
         FLAG,
-        TUPLET;
+        TUPLET,
+        ORNAMENT;
     }
 
     /** The symbols we read. */
@@ -279,7 +290,13 @@ public class VectorSymbols
         FLAG_4_DOWN(Category.FLAG),
         /** A lone italic number, as LilyPond writes the number of a tuplet. */
         TUPLET_3(Category.TUPLET),
-        TUPLET_6(Category.TUPLET);
+        TUPLET_6(Category.TUPLET),
+        /** Ornaments: a trill, a short trill (upper mordent), a mordent, turns. */
+        TRILL(Category.ORNAMENT),
+        PRALL(Category.ORNAMENT),
+        MORDENT(Category.ORNAMENT),
+        TURN(Category.ORNAMENT),
+        TURN_INVERTED(Category.ORNAMENT);
 
         public final Category category;
 

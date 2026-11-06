@@ -45,6 +45,7 @@ import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.ClefInter;
 import org.audiveris.omr.sig.inter.FlagInter;
 import org.audiveris.omr.sig.inter.Inter;
+import org.audiveris.omr.sig.inter.OrnamentInter;
 import org.audiveris.omr.sig.inter.SmallChordInter;
 import org.audiveris.omr.sig.relation.Exclusion;
 import org.audiveris.omr.sig.inter.TupletInter;
@@ -182,6 +183,9 @@ public class SymbolsBuilder
         // Tuplet numbers the PDF draws where none was read
         watch.start("addDrawnTuplets");
         addDrawnTuplets();
+
+        watch.start("addDrawnOrnaments");
+        addDrawnOrnaments();
 
         if (constants.printWatch.isSet()) {
             watch.print();
@@ -347,6 +351,59 @@ public class SymbolsBuilder
 
             if (tuplet != null) {
                 logger.debug("{} read from the PDF", tuplet);
+            }
+        }
+    }
+
+    //-------------------//
+    // addDrawnOrnaments //
+    //-------------------//
+    /**
+     * Propose the ornaments a PDF draws where none was read: the small sign of a trill or a
+     * mordent above a note is often missed, and the note is played plain. A sign already read
+     * there is confirmed.
+     */
+    private void addDrawnOrnaments ()
+    {
+        final int margin = sheet.getInterline() / 2;
+
+        for (Map.Entry<Glyph, VectorSymbols.Kind> entry : VectorChecker.drawnOrnaments(system)
+                .entrySet()) {
+            final Glyph glyph = entry.getKey();
+            final Rectangle around = glyph.getBounds();
+            around.grow(margin, margin);
+
+            final List<Inter> there = system.getSig().inters(OrnamentInter.class).stream()
+                    .filter(o -> o.getBounds().intersects(around)).toList();
+
+            if (!there.isEmpty()) {
+                for (Inter o : there) {
+                    o.setGrade(Math.max(o.getGrade(), constants.drawnOrnamentGrade.getValue()));
+                }
+
+                continue;
+            }
+
+            final Staff staff = system.getClosestStaff(glyph.getCenter2D());
+
+            if (staff == null) {
+                continue;
+            }
+
+            final Shape shape = switch (entry.getValue()) {
+                case TRILL -> Shape.TR;
+                case PRALL -> Shape.MORDENT_INVERTED;
+                case MORDENT -> Shape.MORDENT;
+                case TURN -> Shape.TURN;
+                default -> Shape.TURN_INVERTED;
+            };
+            final Inter ornament = factory.create(
+                    new Evaluation(shape, constants.drawnOrnamentGrade.getValue()),
+                    glyph,
+                    staff);
+
+            if (ornament != null) {
+                logger.debug("{} read from the PDF", ornament);
             }
         }
     }
@@ -653,6 +710,10 @@ public class SymbolsBuilder
         private final Constant.Ratio drawnTupletGrade = new Constant.Ratio(
                 0.8,
                 "Grade given to a tuplet number that the PDF draws");
+
+        private final Constant.Ratio drawnOrnamentGrade = new Constant.Ratio(
+                0.8,
+                "Grade given to an ornament that the PDF draws");
 
         private final Constant.Ratio minFlagGrade = new Constant.Ratio(
                 0.5,

@@ -666,6 +666,21 @@ public abstract class VectorChecker
         return drawnGlyphs(system, Category.TUPLET);
     }
 
+    //----------------//
+    // drawnOrnaments //
+    //----------------//
+    /**
+     * Report the ornaments the PDF draws in a system: trills, mordents and turns, each as a
+     * glyph of the black pixels within it, with its kind.
+     *
+     * @param system the system to process
+     * @return the glyphs of the drawn ornaments, with their kind
+     */
+    public static Map<Glyph, Kind> drawnOrnaments (SystemInfo system)
+    {
+        return drawnGlyphs(system, Category.ORNAMENT);
+    }
+
     //--------------//
     // missedGlyphs //
     //--------------//
