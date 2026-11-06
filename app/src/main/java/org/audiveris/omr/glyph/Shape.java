@@ -450,6 +450,7 @@ public enum Shape
     MULTIPLE_REST_MIDDLE("Multiple measure rest middle"),
     MULTIPLE_REST_RIGHT("Multiple measure rest right"),
     TUPLET_TWO("Duplet, inferred where a compound time needs it"),
+    TUPLET_FIVE("Quintuplet, inferred where five equal notes fill the time of four"),
 
     //
     // Key signatures ---

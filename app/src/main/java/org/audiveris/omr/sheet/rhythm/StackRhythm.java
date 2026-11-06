@@ -1199,8 +1199,9 @@ public class StackRhythm
     // plainGroups //
     //-------------//
     /**
-     * The beam groups of a measure that could be unmarked tuplets: 3 or 6 chords, all in
-     * the measure, of equal duration and without a tuplet sign.
+     * The beam groups of a measure that could be unmarked tuplets: 3, 5 or 6 chords, all in
+     * the measure, of equal duration and without a tuplet sign. Five make a quintuplet, as the
+     * five sixteenths that close a run of Beethoven's Pathetique.
      * <p>
      * In a beam group of 4, three chords of equal duration and a fourth of twice it, first or
      * last, the three could make a triplet that, with the fourth, fills a beat: three sixteenths
@@ -1229,7 +1230,7 @@ public class StackRhythm
                 }
             }
 
-            if ((group.size() != 3) && (group.size() != 6)) {
+            if ((group.size() != 3) && (group.size() != 5) && (group.size() != 6)) {
                 continue;
             }
 

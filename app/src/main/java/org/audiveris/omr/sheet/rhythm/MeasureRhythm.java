@@ -611,10 +611,14 @@ public class MeasureRhythm
 
         if (tupletGenerator != null) {
             for (List<AbstractChordInter> group : forcedGroups) {
-                // A pair is a duplet
+                // A pair is a duplet, five are a quintuplet
                 forcedTuplets.add(tupletGenerator.generateOneTuplet(
                         group,
-                        (group.size() == 2) ? Shape.TUPLET_TWO : null));
+                        switch (group.size()) {
+                            case 2 -> Shape.TUPLET_TWO;
+                            case 5 -> Shape.TUPLET_FIVE;
+                            default -> null;
+                        }));
             }
         }
 
