@@ -222,6 +222,7 @@ public class VectorSymbols
         oldMScore(Kind.REST_8TH, 0xE109);
         oldMScore(Kind.REST_16TH, 0xE10A);
         oldMScore(Kind.REST_32ND, 0xE10B);
+        oldMScore(Kind.FERMATA, 0xE158, 0xE159);
 
         // The Sonata layout draws the augmentation dot and the staccato with one glyph: '.'
         SONATA.put(0xCF, Kind.HEAD_BLACK);
@@ -340,7 +341,7 @@ public class VectorSymbols
 
     //~ Constructors -------------------------------------------------------------------------------
 
-    /** Whether the heads are drawn with a font of a known layout, Emmentaler or SMuFL. */
+    /** Whether the heads are drawn with a font of a known layout: Emmentaler, SMuFL, MScore. */
     private final boolean knownFont;
 
     private VectorSymbols (List<Symbol> all,
@@ -392,8 +393,9 @@ public class VectorSymbols
     // isKnownFont //
     //-------------//
     /**
-     * Tell whether the page draws its heads with a font of a known layout, Emmentaler or
-     * SMuFL, so that a symbol of that font that the page does not draw is not there.
+     * Tell whether the page draws its heads with a font of a known layout, Emmentaler, SMuFL
+     * or the MScore font of MuseScore 2, so that a symbol of that font that the page does not
+     * draw is not there.
      *
      * @return true if so
      */
@@ -657,7 +659,7 @@ public class VectorSymbols
 
         private final List<Symbol> symbols = new ArrayList<>();
 
-        /** Whether some heads are drawn with Emmentaler or a SMuFL font. */
+        /** Whether some heads are drawn with Emmentaler, a SMuFL font or MScore. */
         private boolean knownFont;
 
         /** The characters drawn in a row so far, that may make an octave sign. */
@@ -721,7 +723,7 @@ public class VectorSymbols
                 symbols.add(new Symbol(kind, bounds, false));
 
                 if ((kind.category == Category.HEAD) && (isEmmentaler(font) || ((c != null)
-                        && SMUFL.containsKey(c)))) {
+                        && (SMUFL.containsKey(c) || OLD_MSCORE.containsKey(c))))) {
                     knownFont = true;
                 }
             }
