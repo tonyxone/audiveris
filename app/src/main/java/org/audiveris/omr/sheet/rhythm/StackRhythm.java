@@ -460,6 +460,18 @@ public class StackRhythm
                 }
             }
 
+            // Five are a quintuplet only where they fill a beat, not two eighths and a triplet of
+            // Chopin's fourth Prelude, and where no triplet could make the measure fit: they would
+            // all be given up together, as the sixteenths of a bar of triplets of his Ballade
+            final Rational simpleBeat = new Rational(1, current.den);
+            groups.removeIf(
+                    group -> (group.size() == 5) && !group.get(0).getDurationSansTuplet().times(4)
+                            .equals(simpleBeat));
+
+            if (groups.stream().anyMatch(group -> group.size() != 5)) {
+                groups.removeIf(group -> group.size() == 5);
+            }
+
             if (!groups.isEmpty()) {
                 forced.put(measure, groups);
                 added = true;
