@@ -50,6 +50,7 @@ import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.OrnamentInter;
 import org.audiveris.omr.sig.inter.PedalInter;
+import org.audiveris.omr.sig.inter.RestInter;
 import org.audiveris.omr.sig.inter.SmallChordInter;
 import org.audiveris.omr.sig.inter.StemInter;
 import org.audiveris.omr.sig.inter.TupletInter;
@@ -211,6 +212,9 @@ public class SymbolsBuilder
 
         watch.start("addDrawnClefChanges");
         addDrawnClefChanges();
+
+        watch.start("addDrawnRests");
+        addDrawnRests();
 
         if (constants.printWatch.isSet()) {
             watch.print();
@@ -434,6 +438,50 @@ public class SymbolsBuilder
 
             if (pedal != null) {
                 logger.debug("{} read from the PDF", pedal);
+            }
+        }
+    }
+
+    //---------------//
+    // addDrawnRests //
+    //---------------//
+    /**
+     * Propose the rests a PDF draws where none was read. A rest close to a note of the other
+     * voice, as the quarter rests under the half notes of Liszt's first Consolation, may be
+     * taken in a glyph of its own with it: the notes that follow then start a beat early, and
+     * the rhythm comes out wrong.
+     */
+    private void addDrawnRests ()
+    {
+        final List<Rectangle> known = new ArrayList<>();
+
+        for (Inter rest : system.getSig().inters(RestInter.class)) {
+            known.add(rest.getBounds());
+        }
+
+        for (Shape shape : new Shape[] {
+                Shape.WHOLE_REST,
+                Shape.HALF_REST,
+                Shape.QUARTER_REST,
+                Shape.EIGHTH_REST,
+                Shape.ONE_16TH_REST,
+                Shape.ONE_32ND_REST,
+                Shape.ONE_64TH_REST }) {
+            for (Glyph glyph : VectorChecker.missedGlyphs(system, shape, known)) {
+                final Staff staff = system.getClosestStaff(glyph.getCenter2D());
+
+                if (staff == null) {
+                    continue;
+                }
+
+                final Inter rest = factory.create(
+                        new Evaluation(shape, constants.drawnRestGrade.getValue()),
+                        glyph,
+                        staff);
+
+                if (rest != null) {
+                    logger.debug("{} read from the PDF", rest);
+                }
             }
         }
     }
@@ -1042,6 +1090,10 @@ public class SymbolsBuilder
         private final Constant.Ratio drawnPedalGrade = new Constant.Ratio(
                 0.8,
                 "Grade given to a pedal mark that the PDF draws");
+
+        private final Constant.Ratio drawnRestGrade = new Constant.Ratio(
+                0.8,
+                "Grade given to a rest that the PDF draws");
 
         private final Constant.Ratio drawnFermataGrade = new Constant.Ratio(
                 0.8,

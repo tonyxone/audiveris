@@ -193,6 +193,14 @@ public abstract class VectorChecker
 
             for (Inter inter : good) {
                 inter.setGrade(Math.max(inter.getGrade(), Grades.intrinsicRatio));
+
+                // A rest chord got its grade from the rest as first read: as weak as it was,
+                // the chord would be purged, and the drawn rest with it
+                if ((inter instanceof RestInter rest) && (rest.getChord() != null)) {
+                    final Double chordGrade = rest.getChord().getGrade();
+                    rest.getChord().setGrade((chordGrade == null) ? Grades.intrinsicRatio
+                            : Math.max(chordGrade, Grades.intrinsicRatio));
+                }
             }
 
             drawn.addAll(good);
