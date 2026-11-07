@@ -1568,6 +1568,10 @@ public class SigReducer
     /**
      * Report whether the inter lies within the clef and is a hollow or small head, a chord or stem
      * of such heads only, or a slur: what the pieces of a clef can be misread as.
+     * <p>
+     * A slur read on the curl of a clef change may take in a bit of what follows, as the flat
+     * next to the treble clef of a left hand of Mozart's Fantasia K. 475: lying mostly within
+     * the clef is enough.
      *
      * @param inter the inter to check
      * @param clef  the clef overlapping the inter
@@ -1578,12 +1582,16 @@ public class SigReducer
     {
         final Rectangle box = clef.getBounds();
 
-        if (!box.contains(inter.getBounds())) {
-            return false;
+        if (inter instanceof SlurInter) {
+            final Rectangle slur = inter.getBounds();
+            final Rectangle common = slur.intersection(box);
+
+            return !common.isEmpty() && ((3.0 * common.width * common.height) >= (2.0 * slur.width
+                    * slur.height));
         }
 
-        if (inter instanceof SlurInter) {
-            return true;
+        if (!box.contains(inter.getBounds())) {
+            return false;
         }
 
         if (inter instanceof HeadInter) {
