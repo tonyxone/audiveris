@@ -33,6 +33,7 @@ import org.audiveris.omr.score.TimeRational;
 import org.audiveris.omr.sheet.Picture;
 import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
+import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.vector.VectorSymbols.Category;
 import org.audiveris.omr.sheet.vector.VectorSymbols.Kind;
@@ -49,6 +50,7 @@ import org.audiveris.omr.sig.inter.KeyAlterInter;
 import org.audiveris.omr.sig.inter.RestInter;
 import org.audiveris.omr.sig.relation.Exclusion;
 import org.audiveris.omr.sig.relation.NoExclusion;
+import org.audiveris.omr.util.HorizontalSide;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,8 +67,10 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Class <code>VectorChecker</code> checks the symbols recognized in a system against the
@@ -529,6 +533,114 @@ public abstract class VectorChecker
         }
 
         return null;
+    }
+
+    //-------------//
+    // graceHeads //
+    //-------------//
+    /**
+     * Report the heads read in a staff where the PDF draws the small heads of a grace group:
+     * one to four small notes, close together, right before a regular note, as the three
+     * thirty-seconds of an arpeggio before the beat in Mozart's Rondo alla Turca.
+     * <p>
+     * A longer run of small notes is a cadenza, or cue notes to be played in time, as the oboe
+     * cadenza of Beethoven's fifth symphony: they are left alone. So are small notes not
+     * followed closely by a regular one.
+     *
+     * @param staff the staff to process
+     * @param heads the heads read in the staff
+     * @return the heads standing on such drawn grace heads
+     */
+    public static Set<Inter> graceHeads (Staff staff,
+                                         List<Inter> heads)
+    {
+        final SystemInfo system = staff.getSystem();
+        final VectorSymbols vectorSymbols = VectorSymbols.of(system.getSheet());
+        final Set<Inter> graces = new LinkedHashSet<>();
+
+        if (vectorSymbols.isEmpty() || heads.isEmpty()) {
+            return graces;
+        }
+
+        final int interline = staff.getSpecificInterline();
+        final Rectangle band = new Rectangle(
+                staff.getAbscissa(HorizontalSide.LEFT),
+                staff.getFirstLine().yAt(staff.getAbscissa(HorizontalSide.LEFT)) - (4 * interline),
+                staff.getAbscissa(HorizontalSide.RIGHT) - staff.getAbscissa(HorizontalSide.LEFT),
+                (8 + 4) * interline);
+        final List<Symbol> drawn = new ArrayList<>(vectorSymbols.intersected(Category.HEAD, band));
+
+        if (drawn.stream().noneMatch(Symbol::small)) {
+            return graces;
+        }
+
+        drawn.sort(Comparator.comparingDouble(s -> s.bounds().getCenterX()));
+
+        // Columns of drawn heads, as chords: small or regular
+        final List<List<Symbol>> columns = new ArrayList<>();
+
+        for (Symbol symbol : drawn) {
+            final List<Symbol> last = columns.isEmpty() ? null : columns.get(columns.size() - 1);
+
+            if ((last != null) && (last.get(0).small() == symbol.small()) && (Math.abs(symbol
+                    .bounds().getCenterX() - last.get(0).bounds().getCenterX()) < (symbol
+                            .bounds().getWidth() / 2))) {
+                last.add(symbol);
+            } else {
+                final List<Symbol> column = new ArrayList<>();
+                column.add(symbol);
+                columns.add(column);
+            }
+        }
+
+        final double maxGap = constants.maxGraceGap.getValue() * interline;
+        final Set<Symbol> graceSymbols = new LinkedHashSet<>();
+
+        for (int i = 0; i < columns.size(); i++) {
+            if (!columns.get(i).get(0).small()) {
+                continue;
+            }
+
+            // A run of small columns, each close to the next
+            int j = i;
+
+            while ((j + 1 < columns.size()) && columns.get(j + 1).get(0).small() && (gap(columns
+                    .get(j), columns.get(j + 1)) <= maxGap)) {
+                j++;
+            }
+
+            final boolean before = (i > 0) && columns.get(i - 1).get(0).small() && (gap(columns
+                    .get(i - 1), columns.get(i)) <= maxGap);
+            final boolean after = (j + 1 < columns.size()) && !columns.get(j + 1).get(0).small()
+                    && (gap(columns.get(j), columns.get(j + 1)) <= maxGap);
+
+            if (!before && after && ((j - i + 1) <= constants.maxGraceColumns.getValue())) {
+                for (int k = i; k <= j; k++) {
+                    graceSymbols.addAll(columns.get(k));
+                }
+            }
+
+            i = j;
+        }
+
+        for (Inter head : heads) {
+            final Point center = head.getCenter();
+
+            for (Symbol symbol : graceSymbols) {
+                if (isCentered(center, symbol, symbol.bounds().getWidth() / 2)) {
+                    graces.add(head);
+                    break;
+                }
+            }
+        }
+
+        return graces;
+    }
+
+    private static double gap (List<Symbol> left,
+                               List<Symbol> right)
+    {
+        return right.get(0).bounds().getMinX() - left.get(0).bounds().getMaxX();
     }
 
     //------------//
@@ -1190,6 +1302,15 @@ public abstract class VectorChecker
         private final Scale.Fraction maxTupletOffset = new Scale.Fraction(
                 2.0,
                 "Maximum distance from a tuplet sign read to the number a LilyPond page draws");
+
+        private final Constant.Ratio maxGraceGap = new Constant.Ratio(
+                3.0,
+                "Maximum gap, in interlines, between the notes of a grace group and the next note");
+
+        private final Constant.Integer maxGraceColumns = new Constant.Integer(
+                "chords",
+                4,
+                "Maximum count of chords in a group of grace notes the PDF draws small");
 
         private final Constant.Ratio minAgreement = new Constant.Ratio(
                 0.7,

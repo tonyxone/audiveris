@@ -108,6 +108,9 @@ public class ChordsBuilder
     /** System SIG. */
     private final SIGraph sig;
 
+    /** Heads of the current staff standing on grace notes the PDF draws small. */
+    private Set<Inter> graceHeads = Collections.emptySet();
+
     //~ Constructors -------------------------------------------------------------------------------
 
     /**
@@ -143,6 +146,9 @@ public class ChordsBuilder
 
                 // Isolated heads (instances of WholeInter or SmallWholeInter) found so far in staff
                 final List<HeadInter> wholeHeads = new ArrayList<>();
+
+                // Heads standing on the small heads of a grace group the PDF draws
+                graceHeads = VectorChecker.graceHeads(staff, heads);
 
                 for (Inter inter : heads) {
                     final HeadInter head = (HeadInter) inter;
@@ -326,7 +332,13 @@ public class ChordsBuilder
                 chord = chords.get(0);
                 chord.addMember(head);
             } else {
-                // Create a brand-new stem-based chord
+                // Create a brand-new stem-based chord. A head read on a grace note the PDF draws
+                // small makes a small chord, played as a grace note and not in time
+                if (!head.getShape().isSmallHead() && graceHeads.contains(head)
+                        && isGraceGroup(stem)) {
+                    head.setSmallShape();
+                }
+
                 boolean isSmall = head.getShape().isSmallHead();
                 chord = isSmall ? new SmallChordInter(null) : new HeadChordInter(null);
                 sig.addVertex(chord);
@@ -338,6 +350,44 @@ public class ChordsBuilder
             if (mirrorHead != null) {
                 sig.addEdge(head, mirrorHead.getChord(), new NoExclusion());
                 sig.addEdge(head.getChord(), mirrorHead, new NoExclusion());
+            }
+        }
+
+        return true;
+    }
+
+    //--------------//
+    // isGraceGroup //
+    //--------------//
+    /**
+     * Tell whether all the heads beamed with the stem, if any, are black and stand on grace
+     * notes the PDF draws small: a small head beamed with regular ones is no grace note, nor
+     * is a small hollow head, a cue note played in time.
+     */
+    private boolean isGraceGroup (StemInter stem)
+    {
+        for (Relation rel : sig.getRelations(stem, HeadStemRelation.class)) {
+            final Shape shape = sig.getOppositeInter(stem, rel).getShape();
+
+            if ((shape != Shape.NOTEHEAD_BLACK) && (shape != Shape.NOTEHEAD_BLACK_SMALL)) {
+                return false;
+            }
+        }
+
+        for (AbstractBeamInter beam : stem.getBeams()) {
+            for (StemInter other : beam.getStems()) {
+                for (Relation rel : sig.getRelations(other, HeadStemRelation.class)) {
+                    final Inter head = sig.getOppositeInter(other, rel);
+
+                    if ((head.getShape() != Shape.NOTEHEAD_BLACK) && (head.getShape()
+                            != Shape.NOTEHEAD_BLACK_SMALL)) {
+                        return false;
+                    }
+
+                    if (!head.getShape().isSmallHead() && !graceHeads.contains(head)) {
+                        return false;
+                    }
+                }
             }
         }
 

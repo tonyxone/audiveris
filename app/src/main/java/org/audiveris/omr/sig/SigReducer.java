@@ -360,19 +360,49 @@ public class SigReducer
                         }
                     }
                 } else {
-                    // Standard beams may exclude small (oval) heads
+                    // Standard beams may exclude small (oval) heads, unless they bear only small
+                    // heads: a group of grace notes, read as small from the PDF, beamed by beams
+                    // judged of standard size
                     if (!BeamLinker.allowSmallHeadOnStandardBeam()) {
+                        final Set<Inter> mixedBeams = new LinkedHashSet<>(beamSet);
+                        mixedBeams.removeIf(beam -> bearsOnlySmallHeads((AbstractBeamInter) beam));
+
                         for (Shape small : ShapeSet.HeadsOvalSmall) {
                             final Set<Inter> smallHeadSet = heads.get(small);
 
                             if (smallHeadSet != null) {
-                                exclude(beamSet, smallHeadSet, INCOMPATIBLE);
+                                exclude(mixedBeams, smallHeadSet, INCOMPATIBLE);
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    //---------------------//
+    // bearsOnlySmallHeads //
+    //---------------------//
+    /**
+     * Tell whether all the heads on the stems of a beam are small ones.
+     */
+    private boolean bearsOnlySmallHeads (AbstractBeamInter beam)
+    {
+        boolean any = false;
+
+        for (StemInter stem : beam.getStems()) {
+            for (Relation rel : sig.getRelations(stem, HeadStemRelation.class)) {
+                final Inter head = sig.getOppositeInter(stem, rel);
+
+                if (!head.getShape().isSmallHead()) {
+                    return false;
+                }
+
+                any = true;
+            }
+        }
+
+        return any;
     }
 
     //---------------------//
