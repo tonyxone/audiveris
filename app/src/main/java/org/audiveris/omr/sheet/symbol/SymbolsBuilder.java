@@ -54,6 +54,9 @@ import org.audiveris.omr.sig.inter.SmallChordInter;
 import org.audiveris.omr.sig.inter.StemInter;
 import org.audiveris.omr.sig.inter.TupletInter;
 import org.audiveris.omr.sig.relation.Exclusion;
+import org.audiveris.omr.sig.relation.FlagStemRelation;
+import org.audiveris.omr.sig.relation.NoExclusion;
+import org.audiveris.omr.sig.relation.Relation;
 import org.audiveris.omr.util.Dumping;
 import org.audiveris.omr.util.Navigable;
 import org.audiveris.omr.util.StopWatch;
@@ -202,6 +205,9 @@ public class SymbolsBuilder
 
         watch.start("addDrawnPedals");
         addDrawnPedals();
+
+        watch.start("addDrawnFlags");
+        addDrawnFlags();
 
         if (constants.printWatch.isSet()) {
             watch.print();
@@ -427,6 +433,88 @@ public class SymbolsBuilder
                 logger.debug("{} read from the PDF", pedal);
             }
         }
+    }
+
+    //---------------//
+    // addDrawnFlags //
+    //---------------//
+    /**
+     * Propose the flags a PDF draws where none was read. Two voices of one staff may put their
+     * stems side by side, as Bach's Chaconne does, and the flags of both make one glyph, read as
+     * one flag: the other note was played twice as long.
+     */
+    private void addDrawnFlags ()
+    {
+        for (Map.Entry<Glyph, Shape> entry : VectorChecker.drawnFlags(system).entrySet()) {
+            final Glyph glyph = entry.getKey();
+            final Rectangle box = glyph.getBounds();
+            final double area = box.getWidth() * box.getHeight();
+
+            if (system.getSig().inters(FlagInter.class).stream().anyMatch(f -> {
+                final Rectangle common = f.getBounds().intersection(box);
+
+                return !common.isEmpty() && ((common.getWidth() * common.getHeight()) >= (area
+                        / 2));
+            })) {
+                continue;
+            }
+
+            final Staff staff = system.getClosestStaff(glyph.getCenter2D());
+
+            if (staff == null) {
+                continue;
+            }
+
+            final Inter flag = factory.create(
+                    new Evaluation(entry.getValue(), constants.drawnFlagGrade.getValue()),
+                    glyph,
+                    staff);
+
+            if (flag == null) {
+                continue;
+            }
+
+            logger.debug("{} read from the PDF", flag);
+
+            // The drawn flag may cross the stem of the other voice, or the flag read on it, and
+            // the pixels of its box take in the end of a short stem's head: they are drawn too,
+            // and none must exclude it
+            final SIGraph sig = system.getSig();
+            final Set<Inter> stems = stemsOf(flag);
+            final List<Inter> neighbors = new ArrayList<>(sig.inters(StemInter.class));
+            neighbors.addAll(sig.inters(FlagInter.class));
+            neighbors.addAll(sig.inters(HeadInter.class));
+
+            for (Inter other : neighbors) {
+                if ((other == flag) || stems.contains(other) || !other.getBounds().intersects(
+                        flag.getBounds()) || ((other instanceof FlagInter) && !Collections
+                                .disjoint(stems, stemsOf(other)))) {
+                    continue;
+                }
+
+                Relation exclusion;
+
+                while ((exclusion = sig.getExclusion(flag, other)) != null) {
+                    sig.removeEdge(exclusion);
+                }
+
+                if (!sig.containsEdge(flag, other) && !sig.containsEdge(other, flag)) {
+                    sig.addEdge(flag, other, new NoExclusion());
+                }
+            }
+        }
+    }
+
+    private Set<Inter> stemsOf (Inter flag)
+    {
+        final SIGraph sig = system.getSig();
+        final Set<Inter> stems = new LinkedHashSet<>();
+
+        for (Relation rel : sig.getRelations(flag, FlagStemRelation.class)) {
+            stems.add(sig.getOppositeInter(flag, rel));
+        }
+
+        return stems;
     }
 
     //------------------//
