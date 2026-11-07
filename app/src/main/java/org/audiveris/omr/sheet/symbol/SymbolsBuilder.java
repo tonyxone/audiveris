@@ -209,6 +209,9 @@ public class SymbolsBuilder
         watch.start("addDrawnFlags");
         addDrawnFlags();
 
+        watch.start("addDrawnClefChanges");
+        addDrawnClefChanges();
+
         if (constants.printWatch.isSet()) {
             watch.print();
         }
@@ -431,6 +434,45 @@ public class SymbolsBuilder
 
             if (pedal != null) {
                 logger.debug("{} read from the PDF", pedal);
+            }
+        }
+    }
+
+    //---------------------//
+    // addDrawnClefChanges //
+    //---------------------//
+    /**
+     * Propose the clef changes a PDF draws where no clef was read. The curl of a small clef
+     * may be taken for hollow heads and its line for their stem, and its pixels never make a
+     * glyph of their own, as at the clef changes of the left hand of Liszt's third
+     * Consolation: the clef is read from its own pixels, and the pieces give way to it.
+     */
+    private void addDrawnClefChanges ()
+    {
+        for (Map.Entry<Glyph, Shape> entry : VectorChecker.drawnClefs(system).entrySet()) {
+            final Glyph glyph = entry.getKey();
+            final Staff staff = system.getClosestStaff(glyph.getCenter2D());
+
+            if ((staff == null) || (glyph.getLeft() <= staff.getHeaderStop())) {
+                continue;
+            }
+
+            final Rectangle box = glyph.getBounds();
+
+            if (system.getSig().inters(ClefInter.class).stream().anyMatch(c -> c.getBounds()
+                    .intersects(box))) {
+                continue;
+            }
+
+            final Inter clef = ClefInter.createValid(
+                    glyph,
+                    entry.getValue(),
+                    constants.clefChangeGrade.getValue(),
+                    staff);
+
+            if (clef != null) {
+                system.getSig().addVertex(clef);
+                logger.debug("{} read from the PDF", clef);
             }
         }
     }

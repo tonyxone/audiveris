@@ -1380,8 +1380,33 @@ public class StackRhythm
             }
         }
 
-        if ((d == null) || (before == null) || !before.isRest() || !d.equals(
-                before.getDurationSansTuplet())) {
+        if ((d == null) || (before == null)) {
+            return null;
+        }
+
+        // A rest of the other voice may stand over a long note at about the same abscissa, as
+        // an eighth rest over a half note in the left hand of Liszt's third Consolation
+        if (!before.isRest()) {
+            final int interline = first.getSig().getSystem().getSheet().getInterline();
+            final int bx = before.getCenter().x;
+            AbstractChordInter rest = null;
+
+            for (AbstractChordInter chord : chords) {
+                if (chord.isRest() && (chord.getTopStaff() == first.getTopStaff())
+                        && !group.contains(chord)) {
+                    final int cx = chord.getCenter().x;
+
+                    if ((cx < x) && (cx >= (bx - interline)) && ((rest == null) || (cx > rest
+                            .getCenter().x))) {
+                        rest = chord;
+                    }
+                }
+            }
+
+            before = rest;
+        }
+
+        if ((before == null) || !d.equals(before.getDurationSansTuplet())) {
             return null;
         }
 
