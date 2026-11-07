@@ -1483,8 +1483,9 @@ public abstract class AbstractChordInter
             final List<AbstractChordInter> tied = getFollowingTiedChords();
 
             for (AbstractChordInter chord : tied) {
-                // Make sure the tied chords belong to the same measure
-                if (this.measure == chord.measure) {
+                // Make sure the tied chords belong to the same measure, a small one taking its
+                // voice from the chord it is a grace of
+                if ((this.measure == chord.measure) && !(chord instanceof SmallChordInter)) {
                     chord.setVoice(voice);
                 }
             }

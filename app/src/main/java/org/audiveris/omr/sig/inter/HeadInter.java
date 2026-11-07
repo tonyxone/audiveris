@@ -297,6 +297,22 @@ public class HeadInter
         return duplicateAs(shape);
     }
 
+    //---------------//
+    // setSmallShape //
+    //---------------//
+    /**
+     * Give this head the small version of its shape, as a grace note the PDF draws small
+     * while the head was read with the template of a regular one.
+     */
+    public void setSmallShape ()
+    {
+        shape = switch (shape) {
+            case NOTEHEAD_BLACK -> Shape.NOTEHEAD_BLACK_SMALL;
+            case NOTEHEAD_VOID -> Shape.NOTEHEAD_VOID_SMALL;
+            default -> shape;
+        };
+    }
+
     //-------------//
     // duplicateAs //
     //-------------//
