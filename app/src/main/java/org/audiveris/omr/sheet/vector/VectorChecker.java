@@ -508,6 +508,31 @@ public abstract class VectorChecker
     }
 
     //------------//
+    // drawnClefs //
+    //------------//
+    /**
+     * Report the G and F clefs the PDF draws in a system, each as a glyph of the black pixels
+     * within it, with the shape of a clef change.
+     *
+     * @param system the system to process
+     * @return the glyphs of the drawn clefs, with their small shape
+     */
+    public static Map<Glyph, Shape> drawnClefs (SystemInfo system)
+    {
+        final Map<Glyph, Shape> clefs = new LinkedHashMap<>();
+
+        for (Map.Entry<Glyph, Kind> entry : drawnGlyphs(system, Category.CLEF).entrySet()) {
+            switch (entry.getValue()) {
+                case CLEF_G -> clefs.put(entry.getKey(), Shape.G_CLEF_SMALL);
+                case CLEF_F -> clefs.put(entry.getKey(), Shape.F_CLEF_SMALL);
+                default -> {}
+            }
+        }
+
+        return clefs;
+    }
+
+    //------------//
     // drawnFlags //
     //------------//
     /**
