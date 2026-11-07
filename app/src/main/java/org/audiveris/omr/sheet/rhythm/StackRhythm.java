@@ -472,6 +472,12 @@ public class StackRhythm
                 groups.removeIf(group -> group.size() == 5);
             }
 
+            // So is a sextuplet made with a rest: the sixteenth rest and five sixteenths that
+            // follow triplets in the same bars of the Ballade are plain
+            if (groups.stream().anyMatch(group -> group.size() != 6)) {
+                groups.removeIf(StackRhythm::isRestSextuplet);
+            }
+
             if (!groups.isEmpty()) {
                 forced.put(measure, groups);
                 added = true;
@@ -1207,6 +1213,14 @@ public class StackRhythm
         return dur.times(3).equals(beat);
     }
 
+    //-----------------//
+    // isRestSextuplet //
+    //-----------------//
+    private static boolean isRestSextuplet (List<AbstractChordInter> group)
+    {
+        return (group.size() == 6) && group.get(0).isRest();
+    }
+
     //-------------//
     // plainGroups //
     //-------------//
@@ -1218,6 +1232,10 @@ public class StackRhythm
      * In a beam group of 4, three chords of equal duration and a fourth of twice it, first or
      * last, the three could make a triplet that, with the fourth, fills a beat: three sixteenths
      * and an eighth, as in Debussy's second Arabesque.
+     * <p>
+     * A beam group of 2 or 5 right after a rest of their duration could make, with the rest, a
+     * triplet or a sextuplet: a sixteenth rest and five sixteenths, in the runs of Tchaikovsky's
+     * January, whose sextuplet sign is printed on the first only.
      */
     private static List<List<AbstractChordInter>> plainGroups (Measure measure)
     {
@@ -1235,10 +1253,18 @@ public class StackRhythm
                     continue;
                 }
             } else if (group.size() == 2) {
-                group = tripletAfterRest(group, chords);
+                group = withRestBefore(group, chords);
 
                 if (group == null) {
                     continue;
+                }
+            }
+
+            if (group.size() == 5) {
+                final List<AbstractChordInter> six = withRestBefore(group, chords);
+
+                if (six != null) {
+                    group = six;
                 }
             }
 
@@ -1319,23 +1345,23 @@ public class StackRhythm
         return triplets;
     }
 
-    //------------------//
-    // tripletAfterRest //
-    //------------------//
+    //----------------//
+    // withRestBefore //
+    //----------------//
     /**
-     * A beamed pair of equal chords, right after a rest of their duration: the rest and the
-     * pair could make a triplet, as a rest and two eighths in a triplet beat of Beethoven's
-     * Pathetique. Eighths are beamed by the beat, so a plain pair that follows a rest would
+     * A beam group of equal chords, right after a rest of their duration: the rest and the
+     * group could make a tuplet, as a rest and two eighths in a triplet beat of Beethoven's
+     * Pathetique. Notes are beamed by the beat, so a plain group that follows a rest would
      * stand off it, with nothing to beam to.
      *
-     * @param pair   the 2 chords of a beam group
+     * @param group  the chords of a beam group
      * @param chords the standard chords of the measure
-     * @return the rest and the 2 chords, or null
+     * @return the rest and the chords of the group, or null
      */
-    private static List<AbstractChordInter> tripletAfterRest (List<AbstractChordInter> pair,
-                                                              Set<AbstractChordInter> chords)
+    private static List<AbstractChordInter> withRestBefore (List<AbstractChordInter> group,
+                                                            Set<AbstractChordInter> chords)
     {
-        final List<AbstractChordInter> sorted = new ArrayList<>(pair);
+        final List<AbstractChordInter> sorted = new ArrayList<>(group);
         Collections.sort(sorted, Inters.byCenterAbscissa);
 
         final AbstractChordInter first = sorted.get(0);
@@ -1343,9 +1369,9 @@ public class StackRhythm
         final int x = first.getCenter().x;
         AbstractChordInter before = null;
 
-        // The closest chord before the pair in its staff
+        // The closest chord before the group in its staff
         for (AbstractChordInter chord : chords) {
-            if ((chord.getTopStaff() == first.getTopStaff()) && !pair.contains(chord)) {
+            if ((chord.getTopStaff() == first.getTopStaff()) && !group.contains(chord)) {
                 final int cx = chord.getCenter().x;
 
                 if ((cx < x) && ((before == null) || (cx > before.getCenter().x))) {
