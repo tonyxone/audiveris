@@ -35,6 +35,7 @@ import org.audiveris.omr.glyph.Grades;
 import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.glyph.ShapeSet;
 import org.audiveris.omr.math.GeoUtil;
+import org.audiveris.omr.score.TimeRational;
 import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.Staff;
@@ -53,6 +54,7 @@ import org.audiveris.omr.sig.inter.PedalInter;
 import org.audiveris.omr.sig.inter.RestInter;
 import org.audiveris.omr.sig.inter.SmallChordInter;
 import org.audiveris.omr.sig.inter.StemInter;
+import org.audiveris.omr.sig.inter.TimeCustomInter;
 import org.audiveris.omr.sig.inter.TupletInter;
 import org.audiveris.omr.sig.relation.Exclusion;
 import org.audiveris.omr.sig.relation.FlagStemRelation;
@@ -271,10 +273,14 @@ public class SymbolsBuilder
             }
         }
 
-        // A time signature the PDF draws there replaces any the classifier proposes
-        final Shape drawnTime = VectorChecker.drawnTime(glyph, system);
+        // A time signature the PDF draws there replaces any the classifier proposes. One with no
+        // predefined shape, as the 3/2 of Brahms' Sapphic Ode, is read as a custom one: the
+        // classifier knows no 3/2, and takes it for 3/4
+        final TimeRational drawnRational = VectorChecker.drawnTimeRational(glyph, system);
+        final Shape drawnTime = (drawnRational != null) ? VectorChecker.timeShape(drawnRational)
+                : null;
 
-        if (drawnTime != null) {
+        if (drawnRational != null) {
             final List<Evaluation> kept = new ArrayList<>();
 
             for (Evaluation eval : evals) {
@@ -283,13 +289,28 @@ public class SymbolsBuilder
                 }
             }
 
-            kept.add(0, new Evaluation(drawnTime, constants.drawnTimeGrade.getValue()));
+            if (drawnTime != null) {
+                kept.add(0, new Evaluation(drawnTime, constants.drawnTimeGrade.getValue()));
+            }
+
             evals = kept.toArray(Evaluation[]::new);
         }
 
         // Create one interpretation for each acceptable evaluation
         final SIGraph sig = system.getSig();
         final List<Inter> createdInters = new ArrayList<>();
+
+        if ((drawnRational != null) && (drawnTime == null)) {
+            final TimeCustomInter time = new TimeCustomInter(
+                    drawnRational.num,
+                    drawnRational.den,
+                    constants.drawnTimeGrade.getValue());
+            time.setGlyph(glyph);
+            time.setBounds(glyph.getBounds());
+            time.setStaff(closestStaff);
+            sig.addVertex(time);
+            createdInters.add(time);
+        }
 
         final Shape clefChange = isTrebleClefChange(glyph, closestStaff) ? Shape.G_CLEF_SMALL
                 : drawnClefChange(glyph, closestStaff, evals);
