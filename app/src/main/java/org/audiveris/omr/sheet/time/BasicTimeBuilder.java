@@ -23,6 +23,7 @@ package org.audiveris.omr.sheet.time;
 
 import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sig.inter.Inter;
+import org.audiveris.omr.sig.inter.TimeCustomInter;
 import org.audiveris.omr.sig.inter.TimeNumberInter;
 import org.audiveris.omr.sig.inter.TimeWholeInter;
 import org.audiveris.omr.util.VerticalSide;
@@ -70,7 +71,7 @@ public class BasicTimeBuilder
 
         for (Inter inter : basicColumn.timeSet) {
             if (inter.getStaff() == staff) {
-                if (inter instanceof TimeWholeInter) {
+                if ((inter instanceof TimeWholeInter) || (inter instanceof TimeCustomInter)) {
                     wholes.add(inter);
                 } else if (inter instanceof TimeNumberInter) {
                     TimeNumberInter number = (TimeNumberInter) inter;

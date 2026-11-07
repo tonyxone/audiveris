@@ -29,6 +29,7 @@ import org.audiveris.omr.glyph.Shape;
 import static org.audiveris.omr.run.Orientation.VERTICAL;
 import org.audiveris.omr.run.RunTable;
 import org.audiveris.omr.run.RunTableFactory;
+import org.audiveris.omr.score.TimeRational;
 import org.audiveris.omr.sheet.Picture;
 import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
@@ -619,6 +620,25 @@ public abstract class VectorChecker
     public static Shape drawnTime (Glyph glyph,
                                    SystemInfo system)
     {
+        final TimeRational time = drawnTimeRational(glyph, system);
+
+        return (time != null) ? timeShape(time) : null;
+    }
+
+    //-------------------//
+    // drawnTimeRational //
+    //-------------------//
+    /**
+     * Report the numerator and denominator of the time signature the PDF draws over a glyph,
+     * whether a predefined time signature or not, such as the 3/2 of Brahms' Sapphic Ode.
+     *
+     * @param glyph  the glyph
+     * @param system the containing system
+     * @return the drawn time signature, or null
+     */
+    public static TimeRational drawnTimeRational (Glyph glyph,
+                                                  SystemInfo system)
+    {
         final VectorSymbols vectorSymbols = VectorSymbols.of(system.getSheet());
 
         if (vectorSymbols.isEmpty()) {
@@ -659,7 +679,21 @@ public abstract class VectorChecker
             }
         }
 
-        return switch ((num * 100) + den) {
+        return ((num > 0) && (den > 0)) ? new TimeRational(num, den) : null;
+    }
+
+    //-----------//
+    // timeShape //
+    //-----------//
+    /**
+     * Report the predefined time signature shape of a time signature.
+     *
+     * @param time the time signature
+     * @return its shape, or null if not predefined
+     */
+    public static Shape timeShape (TimeRational time)
+    {
+        return switch ((time.num * 100) + time.den) {
             case 404 -> Shape.TIME_FOUR_FOUR;
             case 202 -> Shape.TIME_TWO_TWO;
             case 204 -> Shape.TIME_TWO_FOUR;
