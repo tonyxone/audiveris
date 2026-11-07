@@ -41,6 +41,7 @@ import org.audiveris.omr.sig.inter.ArticulationInter;
 import org.audiveris.omr.sig.inter.AugmentationDotInter;
 import org.audiveris.omr.sig.inter.ClefInter;
 import org.audiveris.omr.sig.inter.FermataInter;
+import org.audiveris.omr.sig.inter.FlagInter;
 import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.KeyAlterInter;
@@ -184,6 +185,20 @@ public abstract class VectorChecker
                 default -> good.size() >= constants.minAgreement.getValue() * (good.size() + bad
                         .size());
             };
+
+            // A flag the PDF draws is confirmed, and kept from excluding the other drawn symbols
+            // it touches, as the dot of a dotted eighth on a short stem in Bach's first prelude
+            // of the Well-Tempered Clavier. One not drawn may be a small note's: it stays.
+            if (category == Category.FLAG) {
+                for (Inter inter : good) {
+                    inter.setGrade(Math.max(inter.getGrade(), Grades.intrinsicRatio));
+                }
+
+                drawn.addAll(good);
+                nConfirmed += good.size();
+
+                continue;
+            }
 
             if (!trusted) {
                 continue;
@@ -1002,7 +1017,7 @@ public abstract class VectorChecker
     // checkSymbols //
     //--------------//
     /**
-     * Check the clefs, accidentals, dots, rests and fermatas of a system against the PDF.
+     * Check the clefs, accidentals, dots, rests, fermatas and flags of a system against the PDF.
      * Small heads read on an accidental the PDF draws, such as the halves of a sharp, go first:
      * they came after the heads were checked.
      *
@@ -1032,6 +1047,7 @@ public abstract class VectorChecker
         inters.addAll(system.getSig().inters(ArticulationInter.class));
         inters.addAll(system.getSig().inters(RestInter.class));
         inters.addAll(system.getSig().inters(FermataInter.class));
+        inters.addAll(system.getSig().inters(FlagInter.class));
         check(system, inters);
     }
 
@@ -1084,6 +1100,14 @@ public abstract class VectorChecker
             case ONE_32ND_REST -> Kind.REST_32ND;
             case ONE_64TH_REST -> Kind.REST_64TH;
             case FERMATA, FERMATA_BELOW -> Kind.FERMATA;
+            case FLAG_1 -> Kind.FLAG_1_UP;
+            case FLAG_1_DOWN -> Kind.FLAG_1_DOWN;
+            case FLAG_2 -> Kind.FLAG_2_UP;
+            case FLAG_2_DOWN -> Kind.FLAG_2_DOWN;
+            case FLAG_3 -> Kind.FLAG_3_UP;
+            case FLAG_3_DOWN -> Kind.FLAG_3_DOWN;
+            case FLAG_4 -> Kind.FLAG_4_UP;
+            case FLAG_4_DOWN -> Kind.FLAG_4_DOWN;
             case ACCENT -> Kind.ACCENT;
             case TENUTO -> Kind.TENUTO;
             case STACCATISSIMO, STACCATISSIMO_BELOW -> Kind.STACCATISSIMO;
