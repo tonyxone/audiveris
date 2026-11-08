@@ -25,14 +25,19 @@ import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.math.Rational;
 import org.audiveris.omr.score.TimeRational;
 import org.audiveris.omr.sheet.Staff;
+import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.AbstractChordInter;
 import org.audiveris.omr.sig.inter.AbstractTimeInter;
+import org.audiveris.omr.sig.inter.AugmentationDotInter;
 import org.audiveris.omr.sig.inter.BeamGroupInter;
+import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.Inters;
 import org.audiveris.omr.sig.inter.RestChordInter;
 import org.audiveris.omr.sig.inter.TupletInter;
 import org.audiveris.omr.sig.inter.WordInter;
+import org.audiveris.omr.sig.relation.AugmentationRelation;
+import org.audiveris.omr.sig.relation.Relation;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -373,6 +378,7 @@ public class StackRhythm
 
             ok = retryOffTime(ok);
             ok = retryOutOfOrder(ok);
+            ok = retrySharedDots(ok);
 
             if (!ok) {
                 logger.info("{}{} no correct rhythm", stack.getSystem().getLogPrefix(), stack);
@@ -562,6 +568,105 @@ public class StackRhythm
         }
 
         return dropped ? doProcess() : result;
+    }
+
+    //-----------------//
+    // retrySharedDots //
+    //-----------------//
+    /**
+     * Read again the measures still off their time with the dot of each head shared by two
+     * chords given to the other chord, kept so only where the measure then fits.
+     * <p>
+     * A head shared by a beamed eighth and a dotted quarter of another voice has one dot,
+     * which the beam group does not always tell the owner of, as in the Moderato of Chopin's
+     * first Ballade: given to the eighth, it makes the bar an eighth's half too long.
+     *
+     * @param ok the current status
+     * @return the new status
+     */
+    private boolean retrySharedDots (boolean ok)
+    {
+        final Rational expected = stack.getExpectedDuration();
+
+        if ((expected == null) || stack.isImplicit()) {
+            return ok;
+        }
+
+        final SIGraph sig = stack.getSystem().getSig();
+        final Map<Measure, List<HeadInter[]>> moves = new LinkedHashMap<>();
+
+        for (Measure measure : stack.getMeasures()) {
+            if (fits(measure, expected)) {
+                continue;
+            }
+
+            final List<HeadInter[]> pairs = new ArrayList<>();
+
+            for (AbstractChordInter chord : measure.getStandardChords()) {
+                for (Inter note : chord.getNotes()) {
+                    if ((note instanceof HeadInter head) && (head.getMirror() instanceof HeadInter
+                            mirror) && (mirror.getChord() != null) && (head
+                                    .getFirstAugmentationDot() != null) && (mirror
+                                            .getFirstAugmentationDot() == null)) {
+                        pairs.add(new HeadInter[] { head, mirror });
+                    }
+                }
+            }
+
+            if (!pairs.isEmpty()) {
+                moves.put(measure, pairs);
+            }
+        }
+
+        if (moves.isEmpty()) {
+            return ok;
+        }
+
+        for (List<HeadInter[]> pairs : moves.values()) {
+            for (HeadInter[] pair : pairs) {
+                moveDot(sig, pair[0], pair[1]);
+            }
+        }
+
+        final boolean result = doProcess();
+        boolean reverted = false;
+
+        for (Map.Entry<Measure, List<HeadInter[]>> entry : moves.entrySet()) {
+            if (fits(entry.getKey(), expected)) {
+                logger.info("{} off its time, read with the dot of a shared head moved", entry
+                        .getKey());
+            } else {
+                for (HeadInter[] pair : entry.getValue()) {
+                    moveDot(sig, pair[1], pair[0]);
+                }
+
+                reverted = true;
+            }
+        }
+
+        return reverted ? doProcess() : result;
+    }
+
+    /**
+     * Give the dot of a head to another head.
+     */
+    private static void moveDot (SIGraph sig,
+                                 HeadInter from,
+                                 HeadInter to)
+    {
+        final AugmentationDotInter dot = from.getFirstAugmentationDot();
+
+        if (dot == null) {
+            return;
+        }
+
+        for (Relation rel : new ArrayList<>(sig.getAllEdges(dot, from))) {
+            if (rel instanceof AugmentationRelation) {
+                sig.removeEdge(rel);
+            }
+        }
+
+        sig.addEdge(dot, to, new AugmentationRelation());
     }
 
     //-----------------//
