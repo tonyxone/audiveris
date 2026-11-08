@@ -683,9 +683,21 @@ public class PartwiseBuilder
      */
     private Attributes getAttributes ()
     {
+        final List<Object> items = current.pmMeasure.getNoteOrBackupOrForward();
+
+        // Attributes set within a voice go where they take effect: past the notes, forwards or
+        // backups written since the current attributes element, as a mid-measure clef change
+        if ((current.pmAttributes != null) && items.subList(
+                items.indexOf(current.pmAttributes) + 1,
+                items.size()).stream().anyMatch(
+                        item -> (item instanceof Note) || (item instanceof Forward)
+                                || (item instanceof Backup))) {
+            current.pmAttributes = null;
+        }
+
         if (current.pmAttributes == null) {
             current.pmAttributes = new Attributes();
-            current.pmMeasure.getNoteOrBackupOrForward().add(current.pmAttributes);
+            items.add(current.pmAttributes);
         }
 
         return current.pmAttributes;
@@ -2330,7 +2342,6 @@ public class PartwiseBuilder
                         if ((info != null) && // Skip free slots
                                 (info.status == SlotVoice.ChordStatus.BEGIN)) {
                             AbstractChordInter chord = info.chord;
-                            clefIters.push(slot.getXOffset(), chord.getTopStaff());
 
                             // Need a forward before this chord?
                             Rational timeOffset = chord.getTimeOffset();
@@ -2339,6 +2350,12 @@ public class PartwiseBuilder
                                 insertForward(timeOffset.minus(timeCounter), chord);
                                 timeCounter = timeOffset;
                             }
+
+                            // A clef change goes at the time of the chord it stands before, past the
+                            // forward: written before it, it took effect at the voice's previous
+                            // time, as at the start of a bar for a voice entering after a beat, and
+                            // the notes of the other voice before the change were read in it
+                            clefIters.push(slot.getXOffset(), chord.getTopStaff());
 
                             // Wedge events occurring at this time offset?
                             wedgeIters.push(timeOffset);
