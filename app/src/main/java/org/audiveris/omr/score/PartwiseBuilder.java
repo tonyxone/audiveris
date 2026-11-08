@@ -1096,8 +1096,16 @@ public class PartwiseBuilder
                 Object obj = it.previous();
 
                 if (obj instanceof Attributes attributes) {
-                    // Check for clef on proper staff
-                    for (Clef clef : attributes.getClef()) {
+                    // Check for clef on proper staff, the last one first: one attributes element
+                    // may hold the clef of the staff and a change right after it, as the treble
+                    // clef and the bass clef starting Chopin's first Ballade. Compared with the
+                    // first, the later change back to treble was taken for no change, and dropped
+                    final List<Clef> clefs = attributes.getClef();
+
+                    for (ListIterator<Clef> cit = clefs.listIterator(clefs.size()); cit
+                            .hasPrevious();) {
+                        final Clef clef = cit.previous();
+
                         // Check proper staff (in case of multi-staff part)
                         if (Objects.equals(clef.getNumber(), newClef.getNumber())) {
                             // Same staff, so check whether the clef is the same
