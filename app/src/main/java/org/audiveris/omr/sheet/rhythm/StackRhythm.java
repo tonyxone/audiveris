@@ -1341,6 +1341,10 @@ public class StackRhythm
      * A beam group of 2 or 5 right after a rest of their duration could make, with the rest, a
      * triplet or a sextuplet: a sixteenth rest and five sixteenths, in the runs of Tchaikovsky's
      * January, whose sextuplet sign is printed on the first only.
+     * <p>
+     * In a beam group of 6 whose other half is a triplet, the plain half could be one too: two
+     * triplets of sixteenths beamed together, whose first "3" was not read, as in Zimmer's
+     * Interstellar.
      */
     private static List<List<AbstractChordInter>> plainGroups (Measure measure)
     {
@@ -1371,6 +1375,12 @@ public class StackRhythm
                 if (six != null) {
                     group = six;
                 }
+            } else if (group.size() == 6) {
+                final List<AbstractChordInter> half = plainHalfOfSix(group);
+
+                if (half != null) {
+                    group = half;
+                }
             }
 
             if ((group.size() != 3) && (group.size() != 5) && (group.size() != 6)) {
@@ -1400,6 +1410,49 @@ public class StackRhythm
         }
 
         return groups;
+    }
+
+    //----------------//
+    // plainHalfOfSix //
+    //----------------//
+    /**
+     * In a beam group of 6 chords, the first or last 3 with no tuplet when the other 3 make a
+     * triplet.
+     *
+     * @param six the 6 chords of a beam group
+     * @return the 3 plain chords, or null
+     */
+    private static List<AbstractChordInter> plainHalfOfSix (List<AbstractChordInter> six)
+    {
+        final List<AbstractChordInter> sorted = new ArrayList<>(six);
+        Collections.sort(sorted, Inters.byCenterAbscissa);
+
+        final List<AbstractChordInter> first = sorted.subList(0, 3);
+        final List<AbstractChordInter> last = sorted.subList(3, 6);
+
+        if (isPlain(first) && isTriplet(last)) {
+            return new ArrayList<>(first);
+        }
+
+        if (isPlain(last) && isTriplet(first)) {
+            return new ArrayList<>(last);
+        }
+
+        return null;
+    }
+
+    private static boolean isPlain (List<AbstractChordInter> chords)
+    {
+        return chords.stream().allMatch(c -> (c.getTuplet() == null) || c.getTuplet()
+                .isImplicit());
+    }
+
+    private static boolean isTriplet (List<AbstractChordInter> chords)
+    {
+        final TupletInter tuplet = chords.get(0).getTuplet();
+
+        return (tuplet != null) && !tuplet.isImplicit() && (tuplet.getShape()
+                == Shape.TUPLET_THREE) && chords.stream().allMatch(c -> c.getTuplet() == tuplet);
     }
 
     //--------------------//
