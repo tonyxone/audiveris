@@ -183,10 +183,14 @@ public abstract class VectorChecker
                     rejected.getOrDefault(category, Collections.emptyList()));
 
             // A fermata is rare, and most read ones may be false: the font tells it is not there.
-            // So does it for the articulations of a font whose articulations we read
+            // So does it for the articulations and clefs of a font whose symbols we read
             final boolean trusted = switch (category) {
                 case FERMATA -> vectorSymbols.isKnownFont();
                 case ARTICULATION -> vectorSymbols.isFullFont();
+                // A clef read on the beamed small notes of a grace arpeggio, as in Mozart's
+                // Rondo alla Turca, sets a wrong pitch for the rest of its staff, and a system
+                // holds too few clefs for the agreement to tell
+                case CLEF -> vectorSymbols.isFullFont();
                 default -> good.size() >= constants.minAgreement.getValue() * (good.size() + bad
                         .size());
             };
