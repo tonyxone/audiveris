@@ -2588,8 +2588,10 @@ public class PartwiseBuilder
                 final HeadChordInter headChord = (HeadChordInter) chord;
 
                 if (!current.measure.isDummy()) {
-                    // Grace? (every note of a grace chord is marked, not just the first)
-                    if (note.getShape().isSmallHead()) {
+                    // Grace? (every note of a grace chord is marked, not just the first, and
+                    // also a head of it read at full size: written as a plain note, it lengthened
+                    // the voice and every voice written after it started late)
+                    if ((chord instanceof SmallChordInter) || note.getShape().isSmallHead()) {
                         Grace grace = factory.createGrace();
                         current.pmNote.setGrace(grace);
 
