@@ -29,6 +29,7 @@ import org.audiveris.omr.glyph.dynamic.Filament;
 import org.audiveris.omr.lag.Lag;
 import org.audiveris.omr.lag.Lags;
 import org.audiveris.omr.lag.Section;
+import org.audiveris.omr.sheet.Picture;
 import static org.audiveris.omr.run.Orientation.HORIZONTAL;
 import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
@@ -49,6 +50,8 @@ import org.audiveris.omr.util.Navigable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import ij.process.ByteProcessor;
 
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -274,6 +277,47 @@ public class MultipleRestsBuilder
         return serifPeaks;
     }
 
+    //-------------//
+    // leavesStaff //
+    //-------------//
+    /**
+     * Tell whether the ink of a serif candidate runs on beyond the staff.
+     * <p>
+     * The serifs of a multiple rest span a part of the staff only. A beam lying on the mid line,
+     * with a stem down to a head below the staff at each end, has the look of a multiple rest
+     * otherwise.
+     *
+     * @param peak  the serif candidate
+     * @param staff the staff of the rest
+     * @return true if the candidate ink goes past the first or last staff line
+     */
+    private boolean leavesStaff (StaffPeak peak,
+                                 Staff staff)
+    {
+        final ByteProcessor buf = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
+        final int margin = sheet.getScale().getInterline() / 2;
+        final int x = peak.getStart() + (peak.getWidth() / 2);
+        final int yMid = (int) Math.rint(staff.getMidLine().yAt(x));
+        final int yTop = (int) Math.rint(staff.getFirstLine().yAt(x)) - margin;
+        final int yBottom = (int) Math.rint(staff.getLastLine().yAt(x)) + margin;
+
+        int y = yMid;
+        while ((y > 0) && (buf.get(x, y - 1) == 0)) {
+            y--;
+        }
+
+        if (y < yTop) {
+            return true;
+        }
+
+        y = yMid;
+        while ((y < (buf.getHeight() - 1)) && (buf.get(x, y + 1) == 0)) {
+            y++;
+        }
+
+        return y > yBottom;
+    }
+
     //---------//
     // process //
     //---------//
@@ -328,6 +372,11 @@ public class MultipleRestsBuilder
 
             final Map<HorizontalSide, StaffPeak> sidePeaks = getSerifPeaks(beam, staff);
             if (sidePeaks.size() != 2) {
+                continue;
+            }
+
+            // A serif stays within the staff; a stem goes on to its head
+            if (sidePeaks.values().stream().anyMatch(p -> leavesStaff(p, staff))) {
                 continue;
             }
 
