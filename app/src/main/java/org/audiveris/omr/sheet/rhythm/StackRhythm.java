@@ -30,6 +30,7 @@ import org.audiveris.omr.sig.inter.AbstractChordInter;
 import org.audiveris.omr.sig.inter.AbstractTimeInter;
 import org.audiveris.omr.sig.inter.AugmentationDotInter;
 import org.audiveris.omr.sig.inter.BeamGroupInter;
+import org.audiveris.omr.sig.inter.HeadChordInter;
 import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.Inters;
@@ -37,6 +38,7 @@ import org.audiveris.omr.sig.inter.RestChordInter;
 import org.audiveris.omr.sig.inter.TupletInter;
 import org.audiveris.omr.sig.inter.WordInter;
 import org.audiveris.omr.sig.relation.AugmentationRelation;
+import org.audiveris.omr.sig.relation.NextInVoiceRelation;
 import org.audiveris.omr.sig.relation.Relation;
 
 import org.slf4j.Logger;
@@ -379,6 +381,7 @@ public class StackRhythm
             ok = retryOffTime(ok);
             ok = retryOutOfOrder(ok);
             ok = retrySharedDots(ok);
+            ok = retryInterleaved(ok);
 
             if (!ok) {
                 logger.info("{}{} no correct rhythm", stack.getSystem().getLogPrefix(), stack);
@@ -568,6 +571,145 @@ public class StackRhythm
         }
 
         return dropped ? doProcess() : result;
+    }
+
+    //------------------//
+    // retryInterleaved //
+    //------------------//
+    /**
+     * Read again the measures still off their time with the chords of two beam groups that
+     * alternate across a staff, one on stems up and the other on stems down, as one voice.
+     * <p>
+     * The bariolage of Bach's Chaconne is written that way: an open A on stems up between the
+     * notes of a moving line on stems down, each kind beamed with its own. Neither group shows
+     * a rest for the time the other plays, so the second could not start anywhere, and the bar
+     * came out half its length with the open A's left out.
+     *
+     * @param ok the current status
+     * @return the new status
+     */
+    private boolean retryInterleaved (boolean ok)
+    {
+        final Rational expected = stack.getExpectedDuration();
+
+        if ((expected == null) || stack.isImplicit()) {
+            return ok;
+        }
+
+        final SIGraph sig = stack.getSystem().getSig();
+        final Map<Measure, List<Relation>> links = new LinkedHashMap<>();
+
+        for (Measure measure : stack.getMeasures()) {
+            if (fits(measure, expected)) {
+                continue;
+            }
+
+            final List<Relation> added = new ArrayList<>();
+
+            for (List<AbstractChordInter> chain : interleavedChains(measure)) {
+                for (int i = 1; i < chain.size(); i++) {
+                    final AbstractChordInter prev = chain.get(i - 1);
+                    final AbstractChordInter next = chain.get(i);
+
+                    if (sig.getRelation(prev, next, NextInVoiceRelation.class) == null) {
+                        final Relation rel = new NextInVoiceRelation();
+                        sig.addEdge(prev, next, rel);
+                        added.add(rel);
+                    }
+                }
+            }
+
+            if (!added.isEmpty()) {
+                links.put(measure, added);
+            }
+        }
+
+        if (links.isEmpty()) {
+            return ok;
+        }
+
+        final boolean result = doProcess();
+        boolean reverted = false;
+
+        for (Map.Entry<Measure, List<Relation>> entry : links.entrySet()) {
+            final Measure measure = entry.getKey();
+
+            if (fits(measure, expected) && isSequential(measure)) {
+                logger.info("{} off its time, read with alternating beam groups as one voice",
+                        measure);
+            } else {
+                for (Relation rel : entry.getValue()) {
+                    sig.removeEdge(rel);
+                }
+
+                reverted = true;
+            }
+        }
+
+        return reverted ? doProcess() : result;
+    }
+
+    /**
+     * The chords, in order, of each pair of beam groups of a measure that alternate across
+     * one staff with opposite stems.
+     */
+    private static List<List<AbstractChordInter>> interleavedChains (Measure measure)
+    {
+        final List<List<AbstractChordInter>> chains = new ArrayList<>();
+        final List<BeamGroupInter> groups = new ArrayList<>(measure.getBeamGroups());
+
+        for (int i = 0; i < groups.size(); i++) {
+            for (int j = i + 1; j < groups.size(); j++) {
+                final List<AbstractChordInter> chain = alternation(
+                        measure,
+                        groups.get(i).getChords(),
+                        groups.get(j).getChords());
+
+                if (chain != null) {
+                    chains.add(chain);
+                }
+            }
+        }
+
+        return chains;
+    }
+
+    /**
+     * The chords of two beam groups in abscissa order, if they are plain head chords of the
+     * measure on one staff, the stems of each group go one way, the other's the other way,
+     * and the chords alternate between the groups; null otherwise.
+     */
+    private static List<AbstractChordInter> alternation (Measure measure,
+                                                         List<AbstractChordInter> one,
+                                                         List<AbstractChordInter> two)
+    {
+        final Set<AbstractChordInter> chords = measure.getStandardChords();
+        final Staff staff = one.get(0).getStaff();
+        final int dir = one.get(0).getStemDir();
+        final List<AbstractChordInter> all = new ArrayList<>(one);
+        all.addAll(two);
+
+        if ((staff == null) || (dir == 0)) {
+            return null;
+        }
+
+        for (AbstractChordInter chord : all) {
+            if (!chords.contains(chord) || (chord.getClass() != HeadChordInter.class)
+                    || (chord.getStaff() != staff)
+                    || (chord.getStemDir() != (one.contains(chord) ? dir : -dir))) {
+                return null;
+            }
+        }
+
+        Collections.sort(all, Inters.byCenterAbscissa);
+
+        for (int i = 1; i < all.size(); i++) {
+            if (one.contains(all.get(i)) == one.contains(all.get(i - 1))) {
+                return null;
+            }
+        }
+
+        return all;
     }
 
     //-----------------//
