@@ -830,6 +830,27 @@ public abstract class AbstractChordInter
         return null;
     }
 
+    //-----------------------//
+    // isNextInVoiceSequence //
+    //-----------------------//
+    /**
+     * Tell whether this chord is declared as next in voice sequence to another one.
+     *
+     * @return true if so
+     */
+    public boolean isNextInVoiceSequence ()
+    {
+        if (sig != null) {
+            for (Relation rel : sig.incomingEdgesOf(this)) {
+                if (rel instanceof NextInVoiceRelation) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     //----------//
     // getNotes //
     //----------//
@@ -1260,7 +1281,9 @@ public abstract class AbstractChordInter
 
             // Reminder: group.getChords() reports head-chords plus interleaved rest-chords if any
             for (AbstractChordInter chord : group.getChords()) {
-                if (prevChord != null) {
+                // A chord explicitly next in voice to another takes its time from that one,
+                // as one between the chords of another beam group does
+                if ((prevChord != null) && !chord.isNextInVoiceSequence()) {
                     try {
                         if (measure == chord.measure) {
                             chord.setTimeOffset(prevChord.getEndTime());

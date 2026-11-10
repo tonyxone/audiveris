@@ -1991,6 +1991,14 @@ public class MeasureRhythm
 
                 // Make sure voice lastChord slot precedes this slot
                 if (lastChord.getSlot().compareTo(slot) > 0) {
+                    // Unless a rookie is explicitly next in voice to an earlier chord of it,
+                    // whose beam group gave the voice to its later chords already
+                    final AbstractChordInter previous = explicitPrevious(voice);
+
+                    if (previous != null) {
+                        actives.add(previous);
+                    }
+
                     continue;
                 }
 
@@ -2009,6 +2017,31 @@ public class MeasureRhythm
             }
 
             return actives;
+        }
+
+        //------------------//
+        // explicitPrevious //
+        //------------------//
+        /**
+         * Report the chord of a voice, before this slot, that a rookie is explicitly next to.
+         *
+         * @param voice the voice at hand
+         * @return the chord a rookie follows by a NextInVoice relation, or null
+         */
+        private AbstractChordInter explicitPrevious (Voice voice)
+        {
+            for (ChordPair p : nextList) {
+                final AbstractChordInter prev = p.active;
+
+                if (rookies.contains(p.rookie) && (prev.getVoice() == voice)
+                        && (prev.getSlot() != null) && (prev.getSlot().compareTo(slot) < 0)
+                        && (prev.getSig().getRelation(prev, p.rookie, NextInVoiceRelation.class)
+                                != null)) {
+                    return prev;
+                }
+            }
+
+            return null;
         }
 
         //------------//
