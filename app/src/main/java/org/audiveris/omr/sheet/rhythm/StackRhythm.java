@@ -656,6 +656,18 @@ public class StackRhythm
     private static List<List<AbstractChordInter>> interleavedChains (Measure measure)
     {
         final List<List<AbstractChordInter>> chains = new ArrayList<>();
+        final Set<Staff> alternating = new LinkedHashSet<>();
+
+        // A whole staff alternating takes precedence over the pairs of groups within it
+        for (Staff staff : measure.getPart().getStaves()) {
+            final List<AbstractChordInter> chain = staffAlternation(measure, staff);
+
+            if (chain != null) {
+                chains.add(chain);
+                alternating.add(staff);
+            }
+        }
+
         final List<BeamGroupInter> groups = new ArrayList<>(measure.getBeamGroups());
 
         for (int i = 0; i < groups.size(); i++) {
@@ -665,13 +677,71 @@ public class StackRhythm
                         groups.get(i).getChords(),
                         groups.get(j).getChords());
 
-                if (chain != null) {
+                if ((chain != null) && !alternating.contains(chain.get(0).getStaff())) {
                     chains.add(chain);
                 }
             }
         }
 
         return chains;
+    }
+
+    /**
+     * The plain head chords of a measure on one staff in abscissa order, if they are all of
+     * one value, at least 4 and beamed in several groups, and their stems alternate up and
+     * down; null otherwise.
+     * <p>
+     * Two chords stemmed apart at the start make a double stop, whose chord stemmed like the
+     * next one is left out.
+     * The bariolage is often beamed in pairs, a single note flagged, rather than as two groups.
+     */
+    private static List<AbstractChordInter> staffAlternation (Measure measure,
+                                                              Staff staff)
+    {
+        final List<AbstractChordInter> all = new ArrayList<>();
+
+        for (AbstractChordInter chord : measure.getStandardChords()) {
+            if (chord.getStaff() == staff) {
+                if ((chord.getClass() != HeadChordInter.class) || (chord.getStemDir() == 0)) {
+                    return null;
+                }
+
+                all.add(chord);
+            }
+        }
+
+        if (all.size() < 5) {
+            return null;
+        }
+
+        Collections.sort(all, Inters.byCenterAbscissa);
+
+        // A double stop at start
+        final AbstractChordInter c0 = all.get(0);
+        final AbstractChordInter c1 = all.get(1);
+
+        if ((c0.getStemDir() != c1.getStemDir())
+                && (Math.abs(c0.getCenter().x - c1.getCenter().x) < staff.getSpecificInterline())) {
+            all.remove((c0.getStemDir() == all.get(2).getStemDir()) ? 0 : 1);
+        }
+
+        final Rational dur = all.get(0).getDurationSansTuplet();
+        final Set<BeamGroupInter> groups = new LinkedHashSet<>();
+
+        for (int i = 0; i < all.size(); i++) {
+            final AbstractChordInter chord = all.get(i);
+
+            if ((dur == null) || !dur.equals(chord.getDurationSansTuplet())
+                    || ((i > 0) && (chord.getStemDir() == all.get(i - 1).getStemDir()))) {
+                return null;
+            }
+
+            if (chord.getBeamGroup() != null) {
+                groups.add(chord.getBeamGroup());
+            }
+        }
+
+        return (groups.size() >= 2) ? all : null;
     }
 
     /**
