@@ -208,9 +208,10 @@ public class SlotsRetriever
                 return true;
             }
 
-            // If stem directions are identical -> false
+            // If stem directions are identical -> false,
+            // unless heads overlap, as voices stemmed the same way are shifted aside
             if (ch1.getStemDir() == ch2.getStemDir()) {
-                return false;
+                return haveOverlappingHeads(ch1, ch2);
             }
 
             // Embraced?
@@ -255,6 +256,34 @@ public class SlotsRetriever
 
         // Check abscissa shift between heads
         return Math.abs(ch1.getHeadLocation().x - ch2.getHeadLocation().x) <= params.maxSlotDxLow;
+    }
+
+    //----------------------//
+    // haveOverlappingHeads //
+    //----------------------//
+    /**
+     * Tell whether a head of a chord overlaps a head of another chord horizontally,
+     * by a third of a head at least, more than tightly spaced consecutive heads do.
+     *
+     * @param ch1 one chord
+     * @param ch2 another chord
+     * @return true if so
+     */
+    private static boolean haveOverlappingHeads (AbstractChordInter ch1,
+                                                 AbstractChordInter ch2)
+    {
+        for (Inter n1 : ch1.getNotes()) {
+            for (Inter n2 : ch2.getNotes()) {
+                final Rectangle b1 = n1.getBounds();
+                final Rectangle b2 = n2.getBounds();
+
+                if (3 * GeoUtil.xOverlap(b1, b2) >= Math.min(b1.width, b2.width)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     //----------//
@@ -421,6 +450,30 @@ public class SlotsRetriever
         }
 
         return slots;
+    }
+
+    //-------------//
+    // shareEquals //
+    //-------------//
+    /**
+     * Make each of two chords, shifted aside in one slot, equal to the chords equal
+     * to the other one, as a third voice may be shifted further.
+     *
+     * @param ch1 one chord
+     * @param ch2 the other chord
+     */
+    private void shareEquals (AbstractChordInter ch1,
+                              AbstractChordInter ch2)
+    {
+        for (AbstractChordInter[] pair : new AbstractChordInter[][] { { ch1, ch2 }, { ch2, ch1 } }) {
+            for (AbstractChordInter partner : getEquals(pair[0])) {
+                if ((partner != pair[1]) && (getRel(partner, pair[1]) == null)
+                        && !areExplicitlySeparate(partner, pair[1])) {
+                    setRel(partner, pair[1], EQUAL);
+                    setRel(pair[1], partner, EQUAL);
+                }
+            }
+        }
     }
 
     //-------------------//
@@ -630,6 +683,10 @@ public class SlotsRetriever
                 if ((yOverlap > params.maxVerticalOverlap) && areAdjacent(ch1, ch2)) {
                     setRel(ch1, ch2, EQUAL);
                     setRel(ch2, ch1, EQUAL);
+
+                    if (ch1.getStemDir() == ch2.getStemDir()) {
+                        shareEquals(ch1, ch2);
+                    }
                 }
             }
         }
