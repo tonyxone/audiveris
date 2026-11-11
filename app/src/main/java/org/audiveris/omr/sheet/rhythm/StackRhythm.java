@@ -24,6 +24,7 @@ package org.audiveris.omr.sheet.rhythm;
 import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.math.Rational;
 import org.audiveris.omr.score.TimeRational;
+import org.audiveris.omr.math.GeoUtil;
 import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.AbstractChordInter;
@@ -40,6 +41,7 @@ import org.audiveris.omr.sig.inter.WordInter;
 import org.audiveris.omr.sig.relation.AugmentationRelation;
 import org.audiveris.omr.sig.relation.NextInVoiceRelation;
 import org.audiveris.omr.sig.relation.Relation;
+import org.audiveris.omr.sig.relation.SameTimeRelation;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -382,6 +384,7 @@ public class StackRhythm
             ok = retryOutOfOrder(ok);
             ok = retrySharedDots(ok);
             ok = retryInterleaved(ok);
+            ok = retrySideColumns(ok);
 
             if (!ok) {
                 logger.info("{}{} no correct rhythm", stack.getSystem().getLogPrefix(), stack);
@@ -647,6 +650,121 @@ public class StackRhythm
         }
 
         return reverted ? doProcess() : result;
+    }
+
+    //------------------//
+    // retrySideColumns //
+    //------------------//
+    /**
+     * Read again the measures still off their time with the chords stemmed the same way
+     * whose heads stand side by side as sounding at once, kept so only where the measure
+     * then fits.
+     * <p>
+     * A voice stemmed the same way as another one in the same column is shifted aside, by a
+     * whole head where pitches are far apart, as in the multiple stops of Bach's Chaconne:
+     * read one after the other, the chords make the bar too long. Consecutive chords can be
+     * spaced as tightly in a crowded bar, hence the check on the time.
+     *
+     * @param ok the current status
+     * @return the new status
+     */
+    private boolean retrySideColumns (boolean ok)
+    {
+        final Rational expected = stack.getExpectedDuration();
+
+        if ((expected == null) || stack.isImplicit()) {
+            return ok;
+        }
+
+        final SIGraph sig = stack.getSystem().getSig();
+        final Map<Measure, List<Relation>> links = new LinkedHashMap<>();
+
+        for (Measure measure : stack.getMeasures()) {
+            if (fits(measure, expected)) {
+                continue;
+            }
+
+            final List<AbstractChordInter> chords = new ArrayList<>();
+
+            for (AbstractChordInter chord : measure.getStandardChords()) {
+                if ((chord.getClass() == HeadChordInter.class) && (chord.getStem() != null)
+                        && (chord.getStemDir() != 0)) {
+                    chords.add(chord);
+                }
+            }
+
+            Collections.sort(chords, Inters.byCenterAbscissa);
+
+            final List<Relation> added = new ArrayList<>();
+
+            for (int i = 0; i < chords.size(); i++) {
+                for (AbstractChordInter other : chords.subList(i + 1, chords.size())) {
+                    final AbstractChordInter chord = chords.get(i);
+
+                    if (sideBySide(chord, other) && sig.getAllEdges(chord, other).isEmpty()
+                            && sig.getAllEdges(other, chord).isEmpty()) {
+                        final Relation rel = new SameTimeRelation();
+                        sig.addEdge(chord, other, rel);
+                        added.add(rel);
+                    }
+                }
+            }
+
+            if (!added.isEmpty()) {
+                links.put(measure, added);
+            }
+        }
+
+        if (links.isEmpty()) {
+            return ok;
+        }
+
+        final boolean result = doProcess();
+        boolean reverted = false;
+
+        for (Map.Entry<Measure, List<Relation>> entry : links.entrySet()) {
+            final Measure measure = entry.getKey();
+
+            if (fits(measure, expected) && isSequential(measure)) {
+                logger.info("{} off its time, read with heads side by side as one column",
+                        measure);
+            } else {
+                for (Relation rel : entry.getValue()) {
+                    sig.removeEdge(rel);
+                }
+
+                reverted = true;
+            }
+        }
+
+        return reverted ? doProcess() : result;
+    }
+
+    /**
+     * Tell whether two chords on one staff, stemmed the same way on stems of their own and
+     * not beamed together, have heads that touch or overlap horizontally.
+     */
+    private static boolean sideBySide (AbstractChordInter one,
+                                       AbstractChordInter two)
+    {
+        if ((one.getStaff() != two.getStaff()) || (one.getStemDir() != two.getStemDir())
+                || (one.getStem() == two.getStem())
+                || ((one.getBeamGroup() != null) && (one.getBeamGroup() == two.getBeamGroup()))) {
+            return false;
+        }
+
+        for (Inter n1 : one.getNotes()) {
+            for (Inter n2 : two.getNotes()) {
+                final Rectangle b1 = n1.getBounds();
+                final Rectangle b2 = n2.getBounds();
+
+                if (4 * GeoUtil.xGap(b1, b2) <= Math.min(b1.width, b2.width)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
