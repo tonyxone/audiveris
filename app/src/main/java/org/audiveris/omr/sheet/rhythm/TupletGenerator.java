@@ -567,6 +567,15 @@ public class TupletGenerator
 
         Collections.sort(extGroup, Inters.byCenterAbscissa);
 
+        // Not to a beam group that also holds plain notes before or after a triplet
+        if (!isTripletTotal(extGroup)) {
+            final List<AbstractChordInter> run = tripletRun(extGroup);
+
+            if (run != null) {
+                extGroup.retainAll(run);
+            }
+        }
+
         // Check if more than one beam group is present
         final AbstractChordInter pivot = checkGroups(Arrays.asList(extGroup));
 
@@ -579,6 +588,72 @@ public class TupletGenerator
         }
 
         return tuplets;
+    }
+
+    //------------//
+    // tripletRun //
+    //------------//
+    /**
+     * The 3 or 6 chords of equal value, ignoring tuplets, that start or else end a group
+     * of chords, if any.
+     *
+     * @param chords the chords, in abscissa order
+     * @return the run found, or null
+     */
+    private static List<AbstractChordInter> tripletRun (List<AbstractChordInter> chords)
+    {
+        for (boolean leading : new boolean[] { true, false }) {
+            final List<AbstractChordInter> run = new ArrayList<>(chords);
+
+            if (!leading) {
+                Collections.reverse(run);
+            }
+
+            final Rational dur = run.get(0).getDurationSansTuplet();
+            int count = 0;
+
+            while ((count < run.size()) && (dur != null)
+                    && dur.equals(run.get(count).getDurationSansTuplet())) {
+                count++;
+            }
+
+            if ((count == 3) || (count == 6)) {
+                return run.subList(0, count);
+            }
+        }
+
+        return null;
+    }
+
+    //----------------//
+    // isTripletTotal //
+    //----------------//
+    /**
+     * Tell whether the chords, ignoring tuplets, last three times a note value in all,
+     * as the chords of a triplet do.
+     *
+     * @param chords the chords
+     * @return true if so
+     */
+    private static boolean isTripletTotal (List<AbstractChordInter> chords)
+    {
+        if (chords.isEmpty()) {
+            return false;
+        }
+
+        Rational total = Rational.ZERO;
+
+        for (AbstractChordInter chord : chords) {
+            final Rational dur = chord.getDurationSansTuplet();
+
+            if (dur == null) {
+                return false;
+            }
+
+            total = total.plus(dur);
+        }
+
+        return (total.num == 3) && (Integer.bitCount(total.den) == 1);
     }
 
     //-------------------//
