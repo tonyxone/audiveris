@@ -42,8 +42,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
@@ -87,6 +89,9 @@ public class LedgersPostAnalysis
     /** Discarded ledgers per system. */
     private final Map<SystemInfo, List<LedgerInter>> discarded = new TreeMap<>();
 
+    /** True when first ledgers were found away from their theoretical ordinate. */
+    private boolean looseSpacing;
+
     //~ Constructors -------------------------------------------------------------------------------
 
     /**
@@ -104,12 +109,69 @@ public class LedgersPostAnalysis
 
     //~ Methods ------------------------------------------------------------------------------------
 
+    //-------------------//
+    // checkFirstOffsets //
+    //-------------------//
+    /**
+     * Measure how far the first ledgers are drawn from their theoretical ordinate, one
+     * interline away from the staff.
+     * <p>
+     * Some engravings draw them consistently farther, which penalizes or even discards them.
+     * In that case, the ledgers of the systems concerned are built again, now expected at this
+     * offset.
+     * <p>
+     * The offset is measured per system, or on the whole sheet for a system with too few ledgers.
+     */
+    private void checkFirstOffsets ()
+    {
+        final Set<LedgersBuilder> modified = new LinkedHashSet<>();
+
+        for (int side : new int[] { -1, +1 }) {
+            final Map<LedgersBuilder, List<Double>> samples = new LinkedHashMap<>();
+            final List<Double> sheetSamples = new ArrayList<>();
+
+            for (LedgersBuilder builder : builders.values()) {
+                final List<Double> list = builder.getFirstOffsetSamples(side);
+                samples.put(builder, list);
+                sheetSamples.addAll(list);
+            }
+
+            final Double sheetOffset = (sheetSamples.size() >= constants.minSheetOffsetSamples
+                    .getValue()) ? median(sheetSamples) : null;
+            logger.debug("side:{} samples:{} offset:{}", side, sheetSamples.size(), sheetOffset);
+
+            for (Map.Entry<LedgersBuilder, List<Double>> entry : samples.entrySet()) {
+                final List<Double> list = entry.getValue();
+                final Double median = (list.size() >= constants.minSystemOffsetSamples.getValue())
+                        ? Double.valueOf(median(list))
+                        : sheetOffset;
+
+                // Only an offset away from the staff is expected
+                if ((median != null) && ((side * median) >= constants.minFirstOffset.getValue())) {
+                    entry.getKey().setFirstOffset(
+                            side,
+                            side * Math.min(side * median, constants.maxFirstOffset.getValue()));
+                    modified.add(entry.getKey());
+                }
+            }
+        }
+
+        for (LedgersBuilder builder : modified) {
+            builder.rebuildAllLedgers();
+        }
+
+        looseSpacing = !modified.isEmpty();
+    }
+
     //---------//
     // collect //
     //---------//
     /**
      * Collect ledger informations for the whole sheet, to measure mean and standard
      * deviation for vertical distance between ledger and previous ledger or staff line.
+     * <p>
+     * The distance to the staff line is corrected by the offset of first ledgers, if any, to keep
+     * one population with the distances between ledgers.
      */
     private void collect ()
     {
@@ -146,7 +208,9 @@ public class LedgersPostAnalysis
                                         prevLedger.getMedian(),
                                         middle.getX()));
                     } else {
-                        delta = staff.doubleDistanceTo(middle);
+                        // First ledgers may be consistently drawn away from the staff
+                        final double offset = builders.get(staff.getSystem()).getFirstOffset(dir);
+                        delta = staff.doubleDistanceTo(middle) - (dir * offset * il);
                     }
 
                     ///final double delta = staff.doubleDistanceTo(middle) / Math.abs(key);
@@ -246,6 +310,24 @@ public class LedgersPostAnalysis
                     .getValue() * popDeltaBelow.getStandardDeviation();
         }
 
+        if (looseSpacing) {
+            // Ledgers are not drawn at regular distances, so let them lie a bit farther.
+            // (while a candidate much closer than expected is typically a portion of head)
+            final double margin = constants.looseDeltaMargin.getValue();
+
+            if (maxDeltaAboveRatio != null) {
+                maxDeltaAboveRatio = Math.max(
+                        maxDeltaAboveRatio,
+                        popDeltaAbove.getMeanValue() + margin);
+            }
+
+            if (maxDeltaBelowRatio != null) {
+                maxDeltaBelowRatio = Math.max(
+                        maxDeltaBelowRatio,
+                        popDeltaBelow.getMeanValue() + margin);
+            }
+        }
+
         if (popHeight.getCardinality() > 0) {
             minHeightRatio = popHeight.getMeanValue() + constants.minHeightSigmaCoeff.getValue()
                     * popHeight.getStandardDeviation();
@@ -301,11 +383,25 @@ public class LedgersPostAnalysis
         }
     }
 
+    //--------//
+    // median //
+    //--------//
+    private static double median (List<Double> values)
+    {
+        final List<Double> sorted = new ArrayList<>(values);
+        Collections.sort(sorted);
+
+        return sorted.get(sorted.size() / 2);
+    }
+
     //---------//
     // process //
     //---------//
     public void process ()
     {
+        // Detect first ledgers consistently drawn away from their theoretical ordinate
+        checkFirstOffsets();
+
         // Retrieve mean / sigma on ordinate deltas, heights and widths
         collect();
 
@@ -338,6 +434,28 @@ public class LedgersPostAnalysis
         private final Scale.Fraction maxIsolatedLedgerWidth = new Scale.Fraction(
                 3,
                 "Reasonable maximum width for an isolated ledger");
+
+        private final Constant.Integer minSheetOffsetSamples = new Constant.Integer(
+                "ledgers",
+                8,
+                "Minimum number of clear ledgers in sheet to measure the offset of first ledgers");
+
+        private final Constant.Integer minSystemOffsetSamples = new Constant.Integer(
+                "ledgers",
+                4,
+                "Minimum number of clear ledgers in system to measure the offset of its own");
+
+        private final Scale.Fraction minFirstOffset = new Scale.Fraction(
+                0.1,
+                "Minimum offset of first ledgers WRT theoretical ordinate to be applied");
+
+        private final Scale.Fraction maxFirstOffset = new Scale.Fraction(
+                0.35,
+                "Maximum offset of first ledgers WRT theoretical ordinate");
+
+        private final Scale.Fraction looseDeltaMargin = new Scale.Fraction(
+                0.2,
+                "Minimum margin above mean delta, when first ledgers are found at an offset");
 
         private final Constant.Double minDeltaSigmaCoeff = new Constant.Double(
                 "none",

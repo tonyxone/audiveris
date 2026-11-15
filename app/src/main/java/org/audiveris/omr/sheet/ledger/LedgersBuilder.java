@@ -163,6 +163,9 @@ public class LedgersBuilder
 
     private final NamedDouble minLengthHigh;
 
+    /** Offset of first ledgers WRT their theoretical ordinate, per side of the staves. */
+    private final Map<Integer, Double> firstOffsets = new LinkedHashMap<>();
+
     //~ Constructors -------------------------------------------------------------------------------
 
     /**
@@ -343,6 +346,85 @@ public class LedgersBuilder
         return filaments;
     }
 
+    //----------------//
+    // getFirstOffset //
+    //----------------//
+    /**
+     * Report the ordinate offset of the first ledgers on one side of the staves, with
+     * respect to their theoretical ordinate, one interline away from the staff.
+     *
+     * @param dir negative for above the staves, positive for below
+     * @return the offset, as a fraction of interline, zero by default
+     */
+    public double getFirstOffset (int dir)
+    {
+        return firstOffsets.getOrDefault(Integer.signum(dir), 0.0);
+    }
+
+    //-----------------------//
+    // getFirstOffsetSamples //
+    //-----------------------//
+    /**
+     * Report the ordinate offsets of the candidates that clearly look like first ledgers on
+     * one side of the system staves, with respect to their theoretical ordinate.
+     * <p>
+     * Some engravings draw the first ledger farther from the staff than one interline, and
+     * consistently so, which would penalize or even discard these ledgers.
+     *
+     * @param dir negative for above the staves, positive for below
+     * @return the offsets measured, as fractions of interline
+     */
+    public List<Double> getFirstOffsetSamples (int dir)
+    {
+        final int side = Integer.signum(dir);
+        final List<Double> samples = new ArrayList<>();
+
+        if (ledgerCandidates == null) {
+            return samples;
+        }
+
+        minLengthLow.setValue(constants.minLedgerLengthLow.getValue());
+        minLengthHigh.setValue(constants.minLedgerLengthHigh.getValue());
+
+        for (Staff staff : system.getStaves()) {
+            final Part part = staff.getPart();
+
+            if (staff.isTablature() || (part.isMerged() && (side < 0) && (staff == part
+                    .getLastStaff()))) {
+                continue;
+            }
+
+            final int interline = staff.getSpecificInterline();
+            final CheckSuite<StickContext> suite = suites.getSuite(interline);
+            final int yMargin = scale.getInterlineScale(interline).toPixels(
+                    constants.ledgerMarginY);
+            final LineInfo staffLine = (side < 0) ? staff.getFirstLine() : staff.getLastLine();
+            final Rectangle box = staffLine.getBounds();
+            box.y += (side * interline);
+            box.grow(0, 2 * yMargin);
+
+            for (StraightFilament stick : ledgerCandidates) {
+                final Point2D middle = getMiddle(stick);
+
+                if (!box.contains(middle)) {
+                    continue;
+                }
+
+                // Evaluate the stick where it lies
+                final GradeImpacts impacts = suite.getImpacts(
+                        new StickContext(stick, middle.getY()));
+
+                if ((impacts != null) && (impacts.getGrade() >= constants.minOffsetGrade
+                        .getValue())) {
+                    final double yTheo = staffLine.yAt(middle.getX()) + (side * interline);
+                    samples.add((middle.getY() - yTheo) / interline);
+                }
+            }
+        }
+
+        return samples;
+    }
+
     //---------------//
     // getYReference //
     //---------------//
@@ -442,6 +524,7 @@ public class LedgersBuilder
         final LineInfo staffLine = (index < 0) ? staff.getFirstLine() : staff.getLastLine();
         final GlyphIndex glyphIndex = sheet.getGlyphIndex();
         final int minWide = staffScale.toPixels(constants.minWideLedgerLength);
+        final int prevIndex = (index < 0) ? (index + 1) : (index - 1);
 
         // Define bounds for the virtual line, properly shifted and enlarged
         Rectangle virtualLineBox = staffLine.getBounds();
@@ -477,7 +560,10 @@ public class LedgersBuilder
             }
 
             // Check precise vertical distance WRT the target ordinate
-            final double yTarget = yRef + (Integer.signum(index) * interline);
+            // (the first ledger may be consistently drawn away from its theoretical ordinate)
+            final double yTarget = yRef + (Integer.signum(index) * interline) + ((prevIndex == 0)
+                    ? (getFirstOffset(index) * interline)
+                    : 0);
 
             if ((prevWrapper.value != null) && (prevWrapper.value.getBounds().width >= minWide)) {
                 // A wide reference ledger raises width check for the current candidate ledger
@@ -626,6 +712,23 @@ public class LedgersBuilder
         logger.debug("{} All removed ledgers: {}", system, Inters.ids(systemLedgers));
     }
 
+    //-------------------//
+    // rebuildAllLedgers //
+    //-------------------//
+    /**
+     * Forget all the ledgers of this system and build them again from the candidates,
+     * typically with a new offset for first ledgers.
+     */
+    public void rebuildAllLedgers ()
+    {
+        stick2ledger.values().forEach(ledger -> ledger.remove());
+        stick2ledger.clear();
+        ledger2stick.clear();
+
+        system.getStaves().forEach(staff -> staff.clearLedgers());
+        system.getStaves().forEach(staff -> filterLedgers(staff));
+    }
+
     //---------------//
     // reduceLedgers //
     //---------------//
@@ -677,6 +780,21 @@ public class LedgersBuilder
     }
 
     //~ Static Methods -----------------------------------------------------------------------------
+
+    //----------------//
+    // setFirstOffset //
+    //----------------//
+    /**
+     * Assign the ordinate offset of the first ledgers on one side of the staves.
+     *
+     * @param dir    negative for above the staves, positive for below
+     * @param offset the offset, as a fraction of interline
+     */
+    public void setFirstOffset (int dir,
+                                double offset)
+    {
+        firstOffsets.put(Integer.signum(dir), offset);
+    }
 
     //-----------//
     // getMiddle //
@@ -746,6 +864,10 @@ public class LedgersBuilder
         private final Scale.Fraction ledgerMarginY = new Scale.Fraction(
                 0.35,
                 "Margin on ledger ordinate WRT theoretical ordinate");
+
+        private final Constant.Ratio minOffsetGrade = new Constant.Ratio(
+                0.7,
+                "Minimum grade of a ledger, ordinate apart, to measure the offset");
 
         private final Scale.Fraction minAbscissaOverlap = new Scale.Fraction(
                 0.75,
