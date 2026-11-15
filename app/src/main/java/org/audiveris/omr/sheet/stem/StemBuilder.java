@@ -42,6 +42,7 @@ import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.Skew;
 import org.audiveris.omr.sheet.SystemInfo;
+import org.audiveris.omr.sheet.stem.BeamLinker.BLinker;
 import org.audiveris.omr.sheet.stem.BeamLinker.BLinker.VLinker;
 import org.audiveris.omr.sheet.stem.HeadLinker.SLinker.CLinker;
 import org.audiveris.omr.sheet.stem.StemItem.GapItem;
@@ -814,6 +815,7 @@ public class StemBuilder
     {
         final Scale scale = system.getSheet().getScale();
         final int maxYGap = scale.toPixels(StemChecker.getMaxYGap(stemProfile));
+        final int maxBeamYGap = scale.toPixels(constants.maxBeamYGap);
 
         // Current ordinate reached
         Point2D lastPt = null;
@@ -829,19 +831,22 @@ public class StemBuilder
                 // Check gap if any
                 final double gap = yDir * (start.getY() - lastPt.getY());
 
-                if (gap > maxYGap) {
-                    // All following items are unreachable
-                    items = items.subList(0, i);
-                    return;
-                }
+                final Line2D gapLine = (yDir > 0) ? new Line2D.Double(lastPt, start)
+                        : new Line2D.Double(start, lastPt);
 
-                if (gap > 0.01) {
+                if (gap > maxYGap) {
+                    if ((maxYGap <= 0) || (gap > maxBeamYGap) || !isBeamReached(i, start, maxYGap)) {
+                        // All following items are unreachable
+                        items = items.subList(0, i);
+                        return;
+                    }
+
+                    // A stem is often cut right where it meets its beam.
+                    // This hole counts as the largest acceptable one.
+                    items.add(i++, new GapItem(gapLine, maxYGap));
+                } else if (gap > 0.01) {
                     // Insert a gap within the item sequence
-                    items.add(
-                            i++,
-                            new GapItem(
-                                    (yDir > 0) ? new Line2D.Double(lastPt, start)
-                                            : new Line2D.Double(start, lastPt)));
+                    items.add(i++, new GapItem(gapLine));
                 }
             }
 
@@ -849,6 +854,59 @@ public class StemBuilder
                 lastPt = stop;
             }
         }
+    }
+
+    //------------//
+    // hasBeamGap //
+    //------------//
+    /**
+     * Report whether the items sequence, up to the provided index, contains a hole larger
+     * than usual, accepted because a beam lies right after it.
+     *
+     * @param lastIndex index of last item to consider
+     * @return true if so
+     */
+    public boolean hasBeamGap (int lastIndex)
+    {
+        for (int i = 0; (i <= lastIndex) && (i < items.size()); i++) {
+            if ((items.get(i) instanceof GapItem gapItem) && gapItem.beforeBeam) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    //---------------//
+    // isBeamReached //
+    //---------------//
+    /**
+     * Report whether, for a stem started from a head, the items starting at the provided
+     * index lie in a beam or right before it.
+     *
+     * @param index index of the first item to check
+     * @param start starting point of this first item
+     * @param maxDy maximum distance from the starting point to the beam
+     * @return true if so
+     */
+    private boolean isBeamReached (int index,
+                                   Point2D start,
+                                   int maxDy)
+    {
+        if (!(startLinker instanceof CLinker)) {
+            return false;
+        }
+
+        for (StemItem item : items.subList(index, items.size())) {
+            if ((item instanceof LinkerItem linkerItem) && (linkerItem.linker instanceof BLinker)) {
+                // Beam border on head side
+                final double yBorder = (yDir > 0) ? item.line.getY1() : item.line.getY2();
+
+                return (yDir * (yBorder - start.getY())) <= maxDy;
+            }
+        }
+
+        return false;
     }
 
     //--------------//
@@ -1323,5 +1381,9 @@ public class StemBuilder
         private final Constant.Ratio displayZoom = new Constant.Ratio(
                 20,
                 "(debug) Zoom applied on a connection image");
+
+        private final Scale.Fraction maxBeamYGap = new Scale.Fraction(
+                0.6,
+                "Maximum vertical gap between a stem and the beam it reaches");
     }
 }

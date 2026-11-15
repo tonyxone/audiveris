@@ -1650,7 +1650,11 @@ public class HeadLinker
                 }
 
                 if (stem == null) {
-                    stem = sb.createStem(glyphs, stemProfile);
+                    // A stem cut just before its beam is checked with a larger hole in mind
+                    final int checkProfile = sb.hasBeamGap(lastIndex) ? Math.min(
+                            stemProfile + 1,
+                            Profiles.MAX_VALUE) : stemProfile;
+                    stem = sb.createStem(glyphs, checkProfile);
                 }
 
                 if (stem == null) {
