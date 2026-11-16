@@ -110,6 +110,9 @@ public abstract class StemItem
     public static class GapItem
             extends StemItem
     {
+        /** True for a hole larger than usual, accepted because a beam lies right after it. */
+        final boolean beforeBeam;
+
         /**
          * Create a <code>GapItem</code> object;
          *
@@ -118,6 +121,20 @@ public abstract class StemItem
         public GapItem (Line2D line)
         {
             super(line, null, line.getBounds().height);
+            beforeBeam = false;
+        }
+
+        /**
+         * Create a <code>GapItem</code> object for a stem cut just before its beam.
+         *
+         * @param line    the top down gap line
+         * @param contrib the gap height to be considered
+         */
+        public GapItem (Line2D line,
+                        int contrib)
+        {
+            super(line, null, contrib);
+            beforeBeam = true;
         }
 
         @Override
