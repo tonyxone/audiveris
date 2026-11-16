@@ -318,6 +318,12 @@ public class TupletGenerator
                         final List<AbstractChordInter> group = new ArrayList<>(bg.getChords());
                         Collections.sort(group, Inters.byCenterAbscissa);
                         beamGroups.add(group);
+                    } else {
+                        final List<AbstractChordInter> part = tripletPart(bg, voice);
+
+                        if (part != null) {
+                            beamGroups.add(part);
+                        }
                     }
                 }
 
@@ -422,6 +428,46 @@ public class TupletGenerator
         }
 
         return true;
+    }
+
+    //-------------//
+    // tripletPart //
+    //-------------//
+    /**
+     * The 3 or 6 chords of equal value that start or end a larger beam group of the provided
+     * voice, such as the three 16ths after eight 32nds, if any.
+     *
+     * @param bg    the beam group
+     * @param voice the containing voice
+     * @return the chords of the run, in abscissa order, or null
+     */
+    private List<AbstractChordInter> tripletPart (BeamGroupInter bg,
+                                                  Voice voice)
+    {
+        final List<AbstractChordInter> group = new ArrayList<>(bg.getChords());
+
+        if ((group.size() <= 3) || isTripletTotal(group)) {
+            return null;
+        }
+
+        Collections.sort(group, Inters.byCenterAbscissa);
+
+        final List<AbstractChordInter> run = tripletRun(group);
+
+        if ((run == null) || (run.size() == group.size())) {
+            return null;
+        }
+
+        for (AbstractChordInter c : run) {
+            if ((c.getVoice() != voice) || (c.getTuplet() != null && !c.getTuplet().isImplicit())) {
+                return null;
+            }
+        }
+
+        final List<AbstractChordInter> part = new ArrayList<>(run);
+        Collections.sort(part, Inters.byCenterAbscissa);
+
+        return part;
     }
 
     //--------------//
