@@ -167,8 +167,8 @@ public class RestInter
     {
         final Point centroid = glyph.getCentroid();
 
-        // Pick up the closest staff
-        final Staff restStaff = system.getClosestStaff(centroid);
+        // Pick up the closest staff, or between two staves the one of the heads nearby
+        final Staff restStaff = gapStaff(glyph, system, systemHeadChords);
 
         if ((restStaff == null) || restStaff.isTablature()) {
             return null;
@@ -223,6 +223,91 @@ public class RestInter
         return restInter;
     }
 
+    //----------//
+    // gapStaff //
+    //----------//
+    /**
+     * Report the staff of a rest, the closest one, unless the rest lies between two staves
+     * about as far from each, as a tenor rest drawn high above the bass staff.
+     * <p>
+     * The rest then goes with the staff whose heads around are closer to it, ordinate-wise.
+     *
+     * @param glyph            the rest glyph
+     * @param system           the related system
+     * @param systemHeadChords the head-chords in this system
+     * @return the rest staff, or null
+     */
+    private static Staff gapStaff (Glyph glyph,
+                                   SystemInfo system,
+                                   List<Inter> systemHeadChords)
+    {
+        final Point centroid = glyph.getCentroid();
+        final Staff closest = system.getClosestStaff(centroid);
+        final List<Staff> around = system.getStavesAround(centroid);
+
+        if ((closest == null) || (around.size() != 2)) {
+            return closest;
+        }
+
+        final Scale scale = system.getSheet().getScale();
+        final Staff other = (around.get(0) == closest) ? around.get(1) : around.get(0);
+
+        if ((other.doubleDistanceTo(centroid) - closest.doubleDistanceTo(centroid)) > scale
+                .toPixels(constants.gapAmbiguity)) {
+            return closest;
+        }
+
+        final Rectangle box = glyph.getBounds();
+        final double toClosest = headGap(box, closest, systemHeadChords, scale);
+        final double toOther = headGap(box, other, systemHeadChords, scale);
+
+        return (toOther < toClosest) ? other : closest;
+    }
+
+    //---------//
+    // headGap //
+    //---------//
+    /**
+     * Report the ordinate gap between a rest box and the closest heads of a staff around it.
+     *
+     * @param box              the rest bounds
+     * @param staff            the staff at hand
+     * @param systemHeadChords the head-chords in system
+     * @param scale            the sheet scale
+     * @return the smallest gap, or infinity when no head of this staff is around
+     */
+    private static double headGap (Rectangle box,
+                                   Staff staff,
+                                   List<Inter> systemHeadChords,
+                                   Scale scale)
+    {
+        final int dx = scale.toPixels(constants.gapHeadDx);
+        final int maxDy = scale.toPixels(constants.gapHeadDy);
+        double best = Double.POSITIVE_INFINITY;
+
+        for (Inter inter : systemHeadChords) {
+            if ((inter.getStaff() != staff) || !(inter instanceof HeadChordInter)) {
+                continue;
+            }
+
+            final Rectangle heads = ((HeadChordInter) inter).getHeadsBounds();
+
+            if ((heads.x > (box.x + box.width + dx)) || ((heads.x + heads.width) < (box.x
+                    - dx))) {
+                continue;
+            }
+
+            final double gap = Math.max(0, Math.max(heads.y - (box.y + box.height), box.y
+                    - (heads.y + heads.height)));
+
+            if (gap <= maxDy) {
+                best = Math.min(best, gap);
+            }
+        }
+
+        return best;
+    }
+
     //~ Inner Classes ------------------------------------------------------------------------------
 
     //-----------//
@@ -239,5 +324,17 @@ public class RestInter
         private final Scale.Fraction minInterChordDx = new Scale.Fraction(
                 0.5,
                 "Minimum horizontal delta between two chords");
+
+        private final Scale.Fraction gapAmbiguity = new Scale.Fraction(
+                2.0,
+                "Maximum difference in distance to two staves for a rest between them");
+
+        private final Scale.Fraction gapHeadDx = new Scale.Fraction(
+                3.0,
+                "Maximum horizontal distance to heads that tell the staff of a rest");
+
+        private final Scale.Fraction gapHeadDy = new Scale.Fraction(
+                2.0,
+                "Maximum vertical gap to heads that tell the staff of a rest");
     }
 }
