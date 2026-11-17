@@ -297,10 +297,10 @@ public class TupletInter
     //-------------//
     /**
      * Try to create a tuplet inter, checking that there is at least one (head) chord
-     * nearby, and that the glyph does not stand on a ledger.
+     * nearby, and that the glyph does not stand on a ledger or within a line of text.
      * <p>
      * What is left of the ledgers between the stems of notes high above the staff can look
-     * like a 3.
+     * like a 3, and so can a letter of a direction such as "poco cresc. ed agitato".
      *
      * @param glyph        the candidate tuplet glyph
      * @param shape        TUPLET_THREE or TUPLET_SIX
@@ -342,7 +342,44 @@ public class TupletInter
             }
         }
 
+        final Point center = new Point(box.x + (box.width / 2), box.y + (box.height / 2));
+
+        for (Inter inter : system.getSig().inters(SentenceInter.class)) {
+            if (inter.getBounds().contains(center) && isText((SentenceInter) inter)) {
+                logger.debug("Discarding tuplet candidate glyph#{} within text", glyph.getId());
+
+                return null;
+            }
+        }
+
         return new TupletInter(glyph, shape, grade);
+    }
+
+    //--------//
+    // isText //
+    //--------//
+    /**
+     * Report whether the provided sentence is made of real words.
+     * <p>
+     * The bracket around a tuplet number can be read as a sentence too, its pieces being
+     * words with no letter.
+     *
+     * @param sentence the sentence to check
+     * @return true if at least 2 of its words have 2 letters or more
+     */
+    private static boolean isText (SentenceInter sentence)
+    {
+        int count = 0;
+
+        for (Inter member : sentence.getMembers()) {
+            final String value = ((WordInter) member).getValue();
+
+            if ((value != null) && (value.chars().filter(Character::isLetter).count() >= 2)) {
+                count++;
+            }
+        }
+
+        return count >= 2;
     }
 
     //-----------//
