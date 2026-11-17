@@ -2075,9 +2075,9 @@ public class StackRhythm
      * together chords that are not aligned, as in bar 5 of Chopin's Nocturne op. 9 no. 2,
      * where a fingering "3" made a sixteenth start with the left hand chord printed before it.
      * <p>
-     * A voice that starts within the measure starts with the chords of another voice in its
-     * first slot, which the dropped tuplets may move: a left hand voice starting under a
-     * right hand note moves with it.
+     * A voice that starts within the measure starts with a chord of another voice printed
+     * above or below its first chord (or else in its first slot), which the dropped tuplets
+     * may move: a left hand voice starting under a right hand note moves with it.
      *
      * @param onBar true to also require each voice holding a dropped tuplet to end on the bar
      */
@@ -2196,11 +2196,18 @@ public class StackRhythm
     // startInSlot //
     //-------------//
     /**
-     * The start already found for another chord of the slot of a chord, if any.
+     * The start already found for a chord printed above or below a chord, or else for another
+     * chord of its slot, if any.
      */
     private static Rational startInSlot (AbstractChordInter chord,
                                          Map<AbstractChordInter, Rational> starts)
     {
+        for (Entry<AbstractChordInter, Rational> entry : starts.entrySet()) {
+            if (areAligned(chord, entry.getKey())) {
+                return entry.getValue();
+            }
+        }
+
         final Slot slot = chord.getSlot();
 
         if (slot != null) {
