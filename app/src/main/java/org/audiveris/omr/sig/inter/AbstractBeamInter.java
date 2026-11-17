@@ -21,6 +21,7 @@
 // </editor-fold>
 package org.audiveris.omr.sig.inter;
 
+import org.audiveris.omr.constant.Constant;
 import org.audiveris.omr.constant.ConstantSet;
 import org.audiveris.omr.glyph.Grades;
 import org.audiveris.omr.glyph.Shape;
@@ -192,9 +193,11 @@ public abstract class AbstractBeamInter
     // checkAbnormal //
     //---------------//
     /**
-     * Check if this beam is connected to a stem or a rest on each end.
+     * Check if this beam is connected to a stem or a rest on each end, or on one end only
+     * when it carries enough stems.
      *
      * @return true if abnormal
+     * @see #canLackOneEndStem()
      */
     @Override
     public boolean checkAbnormal ()
@@ -223,7 +226,7 @@ public abstract class AbstractBeamInter
             }
         }
 
-        setAbnormal(!left || !right);
+        setAbnormal(!(left && right) && !((left || right) && canLackOneEndStem()));
 
         return isAbnormal();
     }
@@ -494,6 +497,23 @@ public abstract class AbstractBeamInter
         }
 
         return null;
+    }
+
+    //-------------------//
+    // canLackOneEndStem //
+    //-------------------//
+    /**
+     * Report whether this beam carries enough stems to be kept with no stem on one end.
+     * <p>
+     * The end note may be the only thing misread (a head stuck to its accidental, a stem too
+     * short between head and beam), and deleting the beam would turn all its other chords
+     * into quarters.
+     *
+     * @return true if so
+     */
+    public boolean canLackOneEndStem ()
+    {
+        return getStems().size() >= constants.minStemsForOneSidedBeam.getValue();
     }
 
     //-----------//
@@ -1030,6 +1050,11 @@ public abstract class AbstractBeamInter
         private final Fraction maxBeamStemYGap = new Fraction(
                 0.25,
                 "Maximum vertical gap between beam and stem");
+
+        private final Constant.Integer minStemsForOneSidedBeam = new Constant.Integer(
+                "stems",
+                3,
+                "Minimum number of stems for a beam to be kept without a stem on one end");
     }
 
     //--------//
