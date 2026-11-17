@@ -303,6 +303,21 @@ public class ChordsBuilder
                     remove(poorStem, stemChords);
                 }
             }
+
+            if (rels.size() == 2) {
+                final Relation weakRel = getWeakFreeRelation(head, rels);
+
+                if (weakRel != null) {
+                    final StemInter weakStem = (StemInter) sig.getOppositeInter(head, weakRel);
+                    sig.removeEdge(weakRel);
+                    rels.remove(weakRel);
+
+                    if (weakStem.getHeads().isEmpty()) {
+                        logger.debug("Deleting weak {} shared by {}", weakStem, head);
+                        remove(weakStem, stemChords);
+                    }
+                }
+            }
         }
 
         if (rels.isEmpty()) {
@@ -354,6 +369,48 @@ public class ChordsBuilder
         }
 
         return true;
+    }
+
+    //---------------------//
+    // getWeakFreeRelation //
+    //---------------------//
+    /**
+     * Report the link of a shared head to a stem too weak to make a chord of its own.
+     * <p>
+     * The vertical stroke of an accidental just after a head can be read as a second stem,
+     * which splits the head into two chords: the real one and a false quarter.
+     * Such a stem carries no beam and no other head, and its link to the head is weak.
+     *
+     * @param head the shared head
+     * @param rels the two head-stem relations of the head
+     * @return the weakest of such relations, or null if none
+     */
+    private Relation getWeakFreeRelation (HeadInter head,
+                                          List<Relation> rels)
+    {
+        final double minGrade = constants.minSharedStemGrade.getValue();
+        HeadStemRelation weakest = null;
+
+        for (Relation rel : rels) {
+            final HeadStemRelation hs = (HeadStemRelation) rel;
+
+            if (hs.getGrade() >= minGrade) {
+                continue;
+            }
+
+            final StemInter stem = (StemInter) sig.getOppositeInter(head, rel);
+
+            if ((stem.getHeads().size() > 1) || !sig.getRelations(stem, BeamStemRelation.class)
+                    .isEmpty()) {
+                continue;
+            }
+
+            if ((weakest == null) || (hs.getGrade() < weakest.getGrade())) {
+                weakest = hs;
+            }
+        }
+
+        return weakest;
     }
 
     //--------------//
@@ -699,5 +756,9 @@ public class ChordsBuilder
         private final Scale.Fraction maxHorizontalGap = new Scale.Fraction(
                 0.5,
                 "Maximum horizontal gap between two wholes in the same chord");
+
+        private final Constant.Ratio minSharedStemGrade = new Constant.Ratio(
+                0.5,
+                "Minimum link grade for a stem with no beam and no other head to share a head");
     }
 }
