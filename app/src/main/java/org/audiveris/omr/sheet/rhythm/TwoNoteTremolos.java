@@ -218,8 +218,14 @@ public abstract class TwoNoteTremolos
                 + b2.height) + interline);
         final Rectangle area = new Rectangle(left, y0, gap, y1 - y0 + 1);
 
+        // A beam between the stems, within the height of the chords, makes them beamed chords.
+        // A beam just below or above, as that of the other hand in Golden Hour, does not.
+        final int top = Math.min(b1.y, b2.y);
+        final int bottom = Math.max(b1.y + b1.height, b2.y + b2.height);
+        final Rectangle chordsArea = new Rectangle(left, top, gap, bottom - top);
+
         for (Inter beam : beams) {
-            if (beam.getBounds().intersects(area)) {
+            if (beam.getBounds().intersects(chordsArea)) {
                 return false;
             }
         }
