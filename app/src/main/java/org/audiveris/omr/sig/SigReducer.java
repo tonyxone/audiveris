@@ -706,6 +706,8 @@ public class SigReducer
     //-------------------------//
     /**
      * Perform checks on beams.
+     * <p>
+     * A beam lacking a stem on one end only is kept when it carries enough stems.
      *
      * @return the count of modifications done
      */
@@ -718,6 +720,11 @@ public class SigReducer
 
         for (Inter inter : beams) {
             final BeamInter beam = (BeamInter) inter;
+
+            if (((beam.getStemOn(BeamPortion.LEFT) != null) || (beam.getStemOn(BeamPortion.RIGHT)
+                    != null)) && beam.canLackOneEndStem()) {
+                continue;
+            }
 
             for (BeamPortion portion : new BeamPortion[] { BeamPortion.LEFT, BeamPortion.RIGHT }) {
                 if (beam.getStemOn(portion) == null) {
