@@ -297,7 +297,10 @@ public class TupletInter
     //-------------//
     /**
      * Try to create a tuplet inter, checking that there is at least one (head) chord
-     * nearby.
+     * nearby, and that the glyph does not stand on a ledger.
+     * <p>
+     * What is left of the ledgers between the stems of notes high above the staff can look
+     * like a 3.
      *
      * @param glyph        the candidate tuplet glyph
      * @param shape        TUPLET_THREE or TUPLET_SIX
@@ -327,6 +330,16 @@ public class TupletInter
             logger.debug("Discarding isolated tuplet candidate glyph#{}", glyph.getId());
 
             return null;
+        }
+
+        final Rectangle box = glyph.getBounds();
+
+        for (Inter ledger : system.getSig().inters(LedgerInter.class)) {
+            if (box.contains(ledger.getCenter())) {
+                logger.debug("Discarding tuplet candidate glyph#{} on a ledger", glyph.getId());
+
+                return null;
+            }
         }
 
         return new TupletInter(glyph, shape, grade);
