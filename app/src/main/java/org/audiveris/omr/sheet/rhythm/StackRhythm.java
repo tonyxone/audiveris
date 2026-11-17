@@ -2000,6 +2000,10 @@ public class StackRhythm
      * Für Elise, or a fingering "3" read as a triplet, each took a third off their notes.
      * When every voice then ends on the bar once the tuplets are dropped, the implicit ones
      * are not inferred again, and if that is not enough the tuplet signs go too.
+     * <p>
+     * Another voice may already end on the bar, as the left hand of bar 5 of Chopin's Nocturne
+     * op. 9 no. 2 under two fingerings "3": the tuplets are then dropped only if each voice
+     * holding them ends on the bar without them.
      *
      * @return true if some measure lost tuplets, and the stack must be read again
      */
@@ -2016,7 +2020,17 @@ public class StackRhythm
         for (Measure measure : stack.getMeasures()) {
             final Set<TupletInter> tuplets = measure.getTuplets();
 
-            if (tuplets.isEmpty() || !isShort(measure, expected)) {
+            if (tuplets.isEmpty()) {
+                continue;
+            }
+
+            final boolean onBar;
+
+            if (isShort(measure, expected)) {
+                onBar = false;
+            } else if (isPartlyShort(measure, expected)) {
+                onBar = true;
+            } else {
                 continue;
             }
 
@@ -2028,11 +2042,11 @@ public class StackRhythm
                 }
             }
 
-            if (!implicits.isEmpty() && fitsWithout(measure, implicits, expected)) {
+            if (!implicits.isEmpty() && fitsWithout(measure, implicits, expected, onBar)) {
                 logger.info("{} short with implicit tuplets, read without them", measure);
                 noImplicit.add(measure);
                 dropped = true;
-            } else if (fitsWithout(measure, tuplets, expected)) {
+            } else if (fitsWithout(measure, tuplets, expected, onBar)) {
                 logger.info("{} short with tuplets {}, read without them", measure, tuplets);
                 noImplicit.add(measure);
 
@@ -2054,15 +2068,23 @@ public class StackRhythm
     //-------------//
     /**
      * Whether, with the provided tuplets dropped, every voice of a measure ends on or before
-     * its expected duration and one on it, and chords of a slot still start together.
+     * its expected duration and one on it, and chords printed one above the other in different
+     * voices still start together.
+     * <p>
+     * The slots of the current reading are not used for that check: wrong tuplets can put
+     * together chords that are not aligned, as in bar 5 of Chopin's Nocturne op. 9 no. 2,
+     * where a fingering "3" made a sixteenth start with the left hand chord printed before it.
      * <p>
      * A voice that starts within the measure starts with the chords of another voice in its
      * first slot, which the dropped tuplets may move: a left hand voice starting under a
      * right hand note moves with it.
+     *
+     * @param onBar true to also require each voice holding a dropped tuplet to end on the bar
      */
     private static boolean fitsWithout (Measure measure,
                                         Collection<TupletInter> tuplets,
-                                        Rational expected)
+                                        Rational expected,
+                                        boolean onBar)
     {
         Rational longest = null;
         final Map<AbstractChordInter, Rational> starts = new LinkedHashMap<>();
@@ -2102,20 +2124,22 @@ public class StackRhythm
 
             final List<AbstractChordInter> chords = voice.getChords();
             Rational end = start;
+            boolean holds = false;
 
             for (AbstractChordInter chord : chords) {
-                final Rational dur = tuplets.contains(chord.getTuplet()) ? chord
-                        .getDurationSansTuplet() : chord.getDuration();
+                final boolean dropped = tuplets.contains(chord.getTuplet());
+                final Rational dur = dropped ? chord.getDurationSansTuplet() : chord.getDuration();
 
                 if (dur == null) {
                     return false;
                 }
 
+                holds |= dropped;
                 starts.put(chord, end);
                 end = end.plus(dur);
             }
 
-            if (end.compareTo(expected) > 0) {
+            if ((end.compareTo(expected) > 0) || (onBar && holds && !end.equals(expected))) {
                 return false;
             }
 
@@ -2124,23 +2148,48 @@ public class StackRhythm
             }
         }
 
-        for (Slot slot : measure.getStack().getSlots()) {
-            Rational time = null;
+        final List<AbstractChordInter> timed = new ArrayList<>(starts.keySet());
 
-            for (AbstractChordInter chord : slot.getChords()) {
-                final Rational start = starts.get(chord);
+        for (int i = 0; i < timed.size(); i++) {
+            final AbstractChordInter one = timed.get(i);
 
-                if (start != null) {
-                    if ((time != null) && !time.equals(start)) {
-                        return false;
-                    }
-
-                    time = start;
+            for (AbstractChordInter two : timed.subList(i + 1, timed.size())) {
+                if ((one.getVoice() != two.getVoice()) && areAligned(one, two) && !starts.get(one)
+                        .equals(starts.get(two))) {
+                    return false;
                 }
             }
         }
 
         return expected.equals(longest);
+    }
+
+    //------------//
+    // areAligned //
+    //------------//
+    /**
+     * Whether two chords are printed one above the other: a note of one overlaps a note of
+     * the other in abscissa by half its width at least.
+     */
+    private static boolean areAligned (AbstractChordInter one,
+                                       AbstractChordInter two)
+    {
+        for (Inter n1 : one.getNotes()) {
+            final Rectangle b1 = n1.getBounds();
+
+            for (Inter n2 : two.getNotes()) {
+                final Rectangle b2 = n2.getBounds();
+                final int overlap = Math.min(b1.x + b1.width, b2.x + b2.width) - Math.max(
+                        b1.x,
+                        b2.x);
+
+                if (2 * overlap >= Math.min(b1.width, b2.width)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     //-------------//
@@ -2209,6 +2258,36 @@ public class StackRhythm
         }
 
         return timed;
+    }
+
+    //---------------//
+    // isPartlyShort //
+    //---------------//
+    /**
+     * Whether every voice of a measure is timed and ends on or before its expected duration,
+     * one of them before.
+     */
+    private static boolean isPartlyShort (Measure measure,
+                                          Rational expected)
+    {
+        boolean anyShort = false;
+
+        for (Voice voice : measure.getVoices()) {
+            if (voice.isMeasureRest()) {
+                continue;
+            }
+
+            final AbstractChordInter last = voice.getLastChord();
+            final Rational end = (last != null) ? last.getEndTime() : null;
+
+            if ((end == null) || (end.compareTo(expected) > 0)) {
+                return false;
+            }
+
+            anyShort |= (end.compareTo(expected) < 0);
+        }
+
+        return anyShort;
     }
 
     //-------------------------//
