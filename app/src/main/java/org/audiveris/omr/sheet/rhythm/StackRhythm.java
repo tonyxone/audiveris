@@ -505,6 +505,11 @@ public class StackRhythm
     /**
      * Read again the measures still off their time: with strict voices, then with two-note
      * tremolos, then with both. Each measure is kept that way only if it then fits.
+     * <p>
+     * Read with their whole written duration, the chords of the tremolos made the measure long,
+     * and implicit tuplets may have been inferred on them to take the excess off, as in bar 28
+     * of Golden Hour. A measure that does not fit with its tremolos is therefore tried again
+     * without implicit tuplets.
      *
      * @param ok the current status
      * @return the new status
@@ -527,23 +532,61 @@ public class StackRhythm
             }
         }
 
+        final Set<Measure> failed = new LinkedHashSet<>();
+        result = retryTremolos(stack.getMeasures(), false, failed, result);
+
+        if (!failed.isEmpty()) {
+            result = retryTremolos(new ArrayList<>(failed), true, new LinkedHashSet<>(), result);
+        }
+
+        return result;
+    }
+
+    //---------------//
+    // retryTremolos //
+    //---------------//
+    /**
+     * Read again with two-note tremolos those of the provided measures that are off their
+     * time and show some, keeping each measure that way only if it then fits.
+     *
+     * @param measures        the measures to try
+     * @param withoutImplicit true to also read the measures without implicit tuplets
+     * @param failed          (output) the measures tried that did not fit
+     * @param ok              the current status
+     * @return the new status
+     */
+    private boolean retryTremolos (Collection<Measure> measures,
+                                   boolean withoutImplicit,
+                                   Set<Measure> failed,
+                                   boolean ok)
+    {
+        final Rational expected = stack.getExpectedDuration();
+
         // The rests read on the strokes are out of the rhythm during the trial, for good if it works
         final Map<Measure, List<RestChordInter>> tremolos = new LinkedHashMap<>();
 
-        for (Measure measure : stack.getMeasures()) {
+        for (Measure measure : measures) {
             final List<RestChordInter> strokes = new ArrayList<>();
+
+            if (withoutImplicit && noImplicit.contains(measure)) {
+                continue;
+            }
 
             if (!fits(measure, expected) && TwoNoteTremolos.detect(measure, true, strokes)) {
                 measure.hideRestChords(strokes);
                 tremolos.put(measure, strokes);
+
+                if (withoutImplicit) {
+                    noImplicit.add(measure);
+                }
             }
         }
 
         if (tremolos.isEmpty()) {
-            return result;
+            return ok;
         }
 
-        result = doProcess();
+        boolean result = doProcess();
 
         if (retryStrict(tremolos.keySet())) {
             result = doProcess();
@@ -552,8 +595,6 @@ public class StackRhythm
                 result = doProcess();
             }
         }
-
-        boolean dropped = false;
 
         for (Map.Entry<Measure, List<RestChordInter>> entry : tremolos.entrySet()) {
             final Measure measure = entry.getKey();
@@ -569,11 +610,16 @@ public class StackRhythm
                 }
             } else {
                 TwoNoteTremolos.detect(measure, false, new ArrayList<>());
-                dropped = true;
+
+                if (withoutImplicit) {
+                    noImplicit.remove(measure);
+                }
+
+                failed.add(measure);
             }
         }
 
-        return dropped ? doProcess() : result;
+        return failed.isEmpty() ? result : doProcess();
     }
 
     //------------------//
