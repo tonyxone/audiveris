@@ -313,12 +313,15 @@ public class SpotsBuilder
             systemManager.getSystemsOf(center, relevants);
 
             boolean created = false;
+            final GlyphGroup group = glyph.hasGroup(GlyphGroup.THIN_BEAM_SPOT)
+                    ? GlyphGroup.THIN_BEAM_SPOT
+                    : GlyphGroup.BEAM_SPOT;
 
             for (SystemInfo system : relevants) {
                 // Check glyph is within system abscissa boundaries
                 if ((center.x >= system.getLeft()) && (center.x <= system.getRight())) {
                     glyph = glyphIndex.registerOriginal(glyph);
-                    glyph.addGroup(GlyphGroup.BEAM_SPOT);
+                    glyph.addGroup(group);
                     system.addFreeGlyph(glyph); // Needed to survive until end of BEAMS step
                     created = true;
                 }
@@ -461,6 +464,7 @@ public class SpotsBuilder
             }
 
             if (known < (thin.getWeight() * constants.maxThinSpotOverlap.getValue())) {
+                thin.addGroup(GlyphGroup.THIN_BEAM_SPOT);
                 added.add(thin);
             }
         }

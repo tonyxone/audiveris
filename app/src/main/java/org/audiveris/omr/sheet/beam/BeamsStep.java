@@ -80,7 +80,10 @@ public class BeamsStep
                              Context context)
         throws StepException
     {
-        sheet.getSystems().forEach(system -> system.removeGroupedGlyphs(GlyphGroup.BEAM_SPOT));
+        sheet.getSystems().forEach(system -> {
+            system.removeGroupedGlyphs(GlyphGroup.BEAM_SPOT);
+            system.removeGroupedGlyphs(GlyphGroup.THIN_BEAM_SPOT);
+        });
     }
 
     //----------//
