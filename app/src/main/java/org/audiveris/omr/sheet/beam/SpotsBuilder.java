@@ -58,6 +58,7 @@ import org.slf4j.LoggerFactory;
 import ij.process.ByteProcessor;
 
 import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
@@ -185,8 +186,16 @@ public class SpotsBuilder
             eraseHeaderAreas(buffer);
         }
 
+        // Beams thinner than the others, as the eighth beams of an upper voice, vanish in the
+        // standard closing: a closing with a smaller circle adds the spots they make.
+        final double ratio = constants.beamCircleDiameterRatio.getValue();
+        final double beamRatio = constants.beamSpotDiameterRatio.getValue();
+        final ByteProcessor beamBuffer = ((cueId == null) && (beamRatio < ratio))
+                ? (ByteProcessor) buffer.duplicate()
+                : null;
+
         watch.start("close");
-        close(buffer, beam);
+        close(buffer, beam, ratio);
 
         // For visual check
         watch.start("visualCheck");
@@ -242,6 +251,11 @@ public class SpotsBuilder
             new BlackHeadSizer(sheet).process(glyphs);
         }
 
+        if (beamBuffer != null) {
+            watch.start("thinSpots");
+            glyphs.addAll(thinSpots(beamBuffer, offset, beam, beamRatio, buffer));
+        }
+
         if (constants.printWatch.isSet()) {
             watch.print();
         }
@@ -257,11 +271,13 @@ public class SpotsBuilder
      *
      * @param buffer buffer to be modified
      * @param beam   beam height for structure element
+     * @param ratio  diameter of the structure element, as ratio of beam height
      */
     private void close (ByteProcessor buffer,
-                        double beam)
+                        double beam,
+                        double ratio)
     {
-        final double diameter = beam * constants.beamCircleDiameterRatio.getValue();
+        final double diameter = beam * ratio;
         final float radius = (float) (diameter - 1) / 2;
         logger.debug(
                 "Spots retrieval beam: {}, diameter: {}, radius: {} ...",
@@ -397,6 +413,61 @@ public class SpotsBuilder
         }
     }
 
+    //-----------//
+    // thinSpots //
+    //-----------//
+    /**
+     * Build the spots of a closing with a smaller circle that are mostly made of pixels
+     * outside the standard spots.
+     * <p>
+     * Such a spot can hold heads or stems of standard spots, as a thin beam does with the
+     * heads just below it.
+     *
+     * @param buffer    a copy of the buffer before closing (it will be modified)
+     * @param offset    buffer offset WRT sheet coordinates, or null
+     * @param beam      beam height
+     * @param ratio     diameter of the closing circle, as ratio of beam height
+     * @param standards the binarized buffer of standard spots
+     * @return the additional spots
+     */
+    private List<Glyph> thinSpots (ByteProcessor buffer,
+                                   Point offset,
+                                   double beam,
+                                   double ratio,
+                                   ByteProcessor standards)
+    {
+        close(buffer, beam, ratio);
+        buffer.threshold(constants.beamBinarizationThreshold.getValue());
+
+        final RunTableFactory runFactory = new RunTableFactory(SPOT_ORIENTATION);
+        final List<Glyph> thins = GlyphFactory.buildGlyphs(runFactory.createTable(buffer), offset);
+        final List<Glyph> added = new ArrayList<>();
+        final int dx = (offset != null) ? offset.x : 0;
+        final int dy = (offset != null) ? offset.y : 0;
+        final Point pt = new Point();
+
+        for (Glyph thin : thins) {
+            final Rectangle box = thin.getBounds();
+            int known = 0;
+
+            for (int y = box.y; y < (box.y + box.height); y++) {
+                for (int x = box.x; x < (box.x + box.width); x++) {
+                    pt.setLocation(x, y);
+
+                    if (thin.contains(pt) && (standards.get(x - dx, y - dy) == 0)) {
+                        known++;
+                    }
+                }
+            }
+
+            if (known < (thin.getWeight() * constants.maxThinSpotOverlap.getValue())) {
+                added.add(thin);
+            }
+        }
+
+        return added;
+    }
+
     //--------------//
     // saveHeadRuns //
     //--------------//
@@ -458,7 +529,15 @@ public class SpotsBuilder
 
         private final Constant.Ratio beamCircleDiameterRatio = new Constant.Ratio(
                 0.8,
+                "Diameter of circle used to close head spots, as ratio of beam height");
+
+        private final Constant.Ratio beamSpotDiameterRatio = new Constant.Ratio(
+                0.55,
                 "Diameter of circle used to close beam spots, as ratio of beam height");
+
+        private final Constant.Ratio maxThinSpotOverlap = new Constant.Ratio(
+                0.5,
+                "Maximum ratio of a thin beam spot already within standard spots");
 
         private final Constant.Integer beamBinarizationThreshold = new Constant.Integer(
                 "pixel",
