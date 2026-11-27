@@ -27,6 +27,8 @@ import org.audiveris.omr.glyph.Glyph;
 import org.audiveris.omr.glyph.GlyphFactory;
 import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.math.PointUtil;
+import org.audiveris.omr.run.Orientation;
+import org.audiveris.omr.run.RunTableFactory;
 import org.audiveris.omr.sheet.Part;
 import org.audiveris.omr.sheet.Picture;
 import org.audiveris.omr.sheet.Scale;
@@ -36,6 +38,8 @@ import org.audiveris.omr.sheet.StaffManager;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.vector.VectorChecker;
 import org.audiveris.omr.sheet.vector.VectorSymbols;
+import org.audiveris.omr.text.BlockScanner;
+import org.audiveris.omr.text.TextLine;
 import org.audiveris.omr.sheet.ui.ObjectEditor.Handle;
 import org.audiveris.omr.sheet.ui.ObjectUIModel;
 import org.audiveris.omr.sheet.ui.StubsController;
@@ -136,6 +140,10 @@ public class OctaveShiftInter
     /** A word that is the value of an octave sign. */
     private static final Pattern OCTAVE_WORD = Pattern.compile(
             "\\(?(8|15|22)(va|vb|ma|mb|ba)?\\)?");
+
+    /** The value of an octave sign read alone, perhaps stuck to the fingering of a note. */
+    private static final Pattern DOTTED_OCTAVE_VALUE = Pattern.compile(
+            "\\(?(8|15|22)(va|vb|ma|mb|ba)?\\)?[1-5]?");
 
     /** A word that the text recognition made of an octave value and the dashes of its line. */
     private static final Pattern DASHED_OCTAVE_WORD = Pattern.compile(
@@ -1149,6 +1157,336 @@ public class OctaveShiftInter
         }
     }
 
+    //------------//
+    // fromDashes //
+    //------------//
+    /**
+     * Read the octave signs of a system whose value neither the classifier nor the text
+     * recognition of the whole page could read: a dotted line runs right of the value, so the
+     * value glyph is taken alone, just left of the line, and recognized as text.
+     * <p>
+     * The text recognition of the whole page depends on all the symbols found there, so it may
+     * miss a value one run and read it another: here it only depends on the sign itself.
+     *
+     * @param system the system to process
+     */
+    public static void fromDashes (SystemInfo system)
+    {
+        final Sheet sheet = system.getSheet();
+        final ByteProcessor buf = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
+
+        if (buf == null) {
+            return;
+        }
+
+        final int interline = sheet.getScale().getInterline();
+        final List<Inter> known = system.getSig().inters(OctaveShiftInter.class);
+        int scans = 0;
+
+        for (Point start : dottedLineStarts(buf, system.getBounds(), interline)) {
+            if (scans >= constants.maxDottedScans.getValue()) {
+                break;
+            }
+
+            final Glyph glyph = valuePiece(buf, start, interline, sheet);
+
+            if (glyph == null) {
+                continue;
+            }
+
+            // A sign already there is just confirmed: a weak one may get purged otherwise
+            final Rectangle box = glyph.getBounds();
+            final List<Inter> there = known.stream().filter(
+                    os -> ((os.getGlyph() != null) ? os.getGlyph().getBounds() : os.getBounds())
+                            .intersects(box)).toList();
+            final Staff staff = getOwnerStaff(glyph, sheet);
+
+            if ((staff == null) || (staff.getSystem() != system)) {
+                continue;
+            }
+
+            scans++;
+
+            final List<TextLine> lines = new BlockScanner(sheet).scanBuffer(
+                    glyph.getBuffer(),
+                    sheet.getStub().getOcrLanguages(),
+                    glyph.getId());
+
+            if (lines.size() != 1) {
+                continue;
+            }
+
+            final TextLine line = lines.get(0);
+            final Matcher matcher = DOTTED_OCTAVE_VALUE.matcher(line.getValue().replaceAll(
+                    "\\s",
+                    ""));
+
+            if (!matcher.matches()) {
+                continue;
+            }
+
+            final Shape shape = switch (matcher.group(1)) {
+                case "15" -> Shape.QUINDICESIMA;
+                case "22" -> Shape.VENTIDUESIMA;
+                default -> Shape.OTTAVA;
+            };
+
+            final Double confidence = line.getConfidence();
+            final double grade = Math.max(
+                    constants.minDottedGrade.getValue(),
+                    (confidence != null) ? confidence : 0);
+
+            if (!there.isEmpty()) {
+                for (Inter os : there) {
+                    os.setGrade(Math.max(os.getGrade(), grade));
+                }
+
+                continue;
+            }
+
+            final Inter os = create(glyph, shape, grade, staff);
+
+            if (os != null) {
+                logger.debug("{} read left of a dotted line", os);
+                system.getSig().addVertex(os);
+                known.add(os);
+            }
+        }
+    }
+
+    //------------//
+    // valuePiece //
+    //------------//
+    /**
+     * Retrieve the value glyph that a dotted line starts from: the tall piece of ink nearest
+     * left of the line start, across the line ordinate, with the pieces just left of it, as the
+     * "1" of "15". A fingering between the value and the line is too small to be taken.
+     *
+     * @param buf       the binary image
+     * @param start     the line start
+     * @param interline the staff interline
+     * @param sheet     the containing sheet
+     * @return the registered value glyph, or null
+     */
+    private static Glyph valuePiece (ByteProcessor buf,
+                                     Point start,
+                                     int interline,
+                                     Sheet sheet)
+    {
+        final Rectangle region = new Rectangle(
+                start.x - (3 * interline),
+                start.y - (2 * interline),
+                (3 * interline) + (interline / 2),
+                4 * interline).intersection(new Rectangle(0, 0, buf.getWidth(), buf.getHeight()));
+
+        if (region.isEmpty()) {
+            return null;
+        }
+
+        final ByteProcessor crop;
+
+        synchronized (buf) {
+            buf.setRoi(region);
+            crop = (ByteProcessor) buf.crop();
+            buf.resetRoi();
+        }
+
+        final List<Glyph> pieces = GlyphFactory.buildGlyphs(
+                new RunTableFactory(Orientation.VERTICAL).createTable(crop),
+                region.getLocation());
+        final double minHeight = constants.minDottedValueHeight.getValue() * interline;
+        final double maxHeight = constants.maxDottedValueHeight.getValue() * interline;
+        final double maxWidth = constants.maxDottedValueWidth.getValue() * interline;
+        Glyph best = null;
+
+        for (Glyph piece : pieces) {
+            final Rectangle b = piece.getBounds();
+            final int right = b.x + b.width;
+
+            if ((b.height < minHeight) || (b.height > maxHeight) || (b.width > maxWidth)
+                    || (b.y > start.y + (interline / 2)) || (b.y + b.height < start.y)
+                    || (right > start.x + (interline / 2)) || (right < start.x - (2
+                            * interline))) {
+                continue;
+            }
+
+            if ((best == null) || (right > (best.getLeft() + best.getWidth()))) {
+                best = piece;
+            }
+        }
+
+        if (best == null) {
+            return null;
+        }
+
+        // A value of two digits
+        final List<Glyph> parts = new ArrayList<>(List.of(best));
+        final Rectangle bestBox = best.getBounds();
+        final int maxGap = (int) Math.ceil(constants.maxDigitGap.getValue() * interline);
+
+        for (Glyph piece : pieces) {
+            final Rectangle b = piece.getBounds();
+
+            if ((piece != best) && (b.x + b.width <= bestBox.x) && (bestBox.x - (b.x + b.width)
+                    <= maxGap) && (b.height >= minHeight) && (b.y < bestBox.y + bestBox.height)
+                    && (b.y + b.height > bestBox.y)) {
+                parts.add(piece);
+            }
+        }
+
+        final Glyph value = (parts.size() == 1) ? best : GlyphFactory.buildGlyph(parts);
+
+        return sheet.getGlyphIndex().registerOriginal(value);
+    }
+
+    //------------------//
+    // dottedLineStarts //
+    //------------------//
+    /**
+     * Report where the dotted lines of a region start: rows of small isolated dots or dashes,
+     * at most an interline apart, over several interlines. A note crossing a line may cut it on
+     * some rows: the pieces of a line found on nearby rows are merged.
+     *
+     * @param buf       the binary image
+     * @param region    the region to browse
+     * @param interline the staff interline
+     * @return the left end of each line, one per line
+     */
+    private static List<Point> dottedLineStarts (ByteProcessor buf,
+                                                 Rectangle region,
+                                                 int interline)
+    {
+        final int width = buf.getWidth();
+        final int height = buf.getHeight();
+        final int clearance = Math.max(2, interline / 4);
+        final int maxDash = (int) Math.ceil(constants.maxDotLength.getValue() * interline);
+        final int minDots = constants.minDottedDots.getValue();
+        final int minSpan = (int) Math.round(constants.minDottedSpan.getValue() * interline);
+        final int x0 = Math.max(1, region.x);
+        final int x1 = Math.min(width - 1, region.x + region.width);
+        final int y0 = Math.max(clearance + 1, region.y);
+        final int y1 = Math.min(height - clearance - 2, region.y + region.height);
+        final List<int[]> lines = new ArrayList<>(); // first, last, row
+
+        for (int r = y0; r <= y1; r++) {
+            int first = -1; // Left end of current chain
+            int last = -1; // Right end of last dot in chain
+            int dots = 0;
+            int runStart = -1;
+
+            for (int c = x0; c <= x1; c++) {
+                final boolean core = (c < x1) && (buf.get(c, r) == 0) && (buf.get(
+                        c,
+                        r - clearance - 1) != 0) && (buf.get(c, r + clearance + 1) != 0);
+
+                if (core) {
+                    if (runStart < 0) {
+                        runStart = c;
+                    }
+
+                    continue;
+                }
+
+                if (runStart < 0) {
+                    continue;
+                }
+
+                final int runEnd = c - 1;
+                final boolean isDot = ((runEnd - runStart + 1) <= maxDash) && isIsolated(
+                        buf,
+                        runStart,
+                        runEnd,
+                        r,
+                        clearance);
+
+                if (isDot && (last >= 0) && ((runStart - last - 1) <= interline)) {
+                    dots++;
+                    last = runEnd;
+                } else {
+                    if ((dots >= minDots) && ((last - first) >= minSpan)) {
+                        addLine(lines, first, last, r, interline);
+                    }
+
+                    first = isDot ? runStart : -1;
+                    last = isDot ? runEnd : -1;
+                    dots = isDot ? 1 : 0;
+                }
+
+                runStart = -1;
+            }
+
+            if ((dots >= minDots) && ((last - first) >= minSpan)) {
+                addLine(lines, first, last, r, interline);
+            }
+        }
+
+        final List<Point> starts = new ArrayList<>();
+
+        for (int[] line : lines) {
+            starts.add(new Point(line[0], line[2]));
+        }
+
+        return starts;
+    }
+
+    //------------//
+    // isIsolated //
+    //------------//
+    /**
+     * Tell whether a horizontal run of ink is a dot: clear all around, within the clearance
+     * above and below it, unlike a piece of a letter or of a note.
+     */
+    private static boolean isIsolated (ByteProcessor buf,
+                                       int start,
+                                       int end,
+                                       int r,
+                                       int clearance)
+    {
+        for (int y = r - clearance; y <= r + clearance; y++) {
+            if ((buf.get(start - 1, y) == 0) || (buf.get(end + 1, y) == 0)) {
+                return false;
+            }
+        }
+
+        for (int x = start - 1; x <= end + 1; x++) {
+            if ((buf.get(x, r - clearance - 1) == 0) || (buf.get(x, r + clearance + 1) == 0)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    //---------//
+    // addLine //
+    //---------//
+    /**
+     * Add a piece of dotted line, merged with any piece of the same line found on a nearby
+     * row: the line starts at the leftmost piece.
+     */
+    private static void addLine (List<int[]> lines,
+                                 int first,
+                                 int last,
+                                 int r,
+                                 int interline)
+    {
+        for (int[] line : lines) {
+            if ((Math.abs(line[2] - r) <= (interline / 2)) && (first <= (line[1] + interline))
+                    && (last >= (line[0] - interline))) {
+                if (first < line[0]) {
+                    line[0] = first;
+                    line[2] = r;
+                }
+
+                line[1] = Math.max(line[1], last);
+
+                return;
+            }
+        }
+
+        lines.add(new int[]{first, last, r});
+    }
+
     //--------------//
     // leadingPiece //
     //--------------//
@@ -1633,6 +1971,44 @@ public class OctaveShiftInter
         private final Constant.Ratio minLineShare = new Constant.Ratio(
                 0.6,
                 "Share of a short window right of the value that its line must fill");
+
+        private final Constant.Integer maxDottedScans = new Constant.Integer(
+                "scans",
+                12,
+                "Maximum count of text scans left of dotted lines, per system");
+
+        private final Constant.Integer minDottedDots = new Constant.Integer(
+                "dots",
+                8,
+                "Minimum count of dots or dashes in a dotted line");
+
+        private final Constant.Ratio minDottedSpan = new Constant.Ratio(
+                3.0,
+                "Minimum length, in interlines, of a dotted line");
+
+        private final Constant.Ratio maxDotLength = new Constant.Ratio(
+                0.6,
+                "Maximum length, in interlines, of a dot or dash of a dotted line");
+
+        private final Constant.Ratio minDottedValueHeight = new Constant.Ratio(
+                1.2,
+                "Minimum height, in interlines, of an octave value before a dotted line");
+
+        private final Constant.Ratio maxDottedValueHeight = new Constant.Ratio(
+                2.5,
+                "Maximum height, in interlines, of an octave value before a dotted line");
+
+        private final Constant.Ratio maxDottedValueWidth = new Constant.Ratio(
+                2.0,
+                "Maximum width, in interlines, of a digit of an octave value before a dotted line");
+
+        private final Constant.Ratio maxDigitGap = new Constant.Ratio(
+                0.4,
+                "Maximum gap, in interlines, between the digits of an octave value");
+
+        private final Constant.Ratio minDottedGrade = new Constant.Ratio(
+                0.5,
+                "Minimum grade of an octave value read left of a dotted line");
     }
 
     //--------//
