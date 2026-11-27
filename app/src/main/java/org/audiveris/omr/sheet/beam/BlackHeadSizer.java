@@ -38,6 +38,9 @@ import org.audiveris.omr.sheet.Scale.BlackHeadScale;
 import org.audiveris.omr.sheet.Scale.MusicFontScale;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SystemInfo;
+import org.audiveris.omr.sheet.vector.VectorSymbols;
+import org.audiveris.omr.sheet.vector.VectorSymbols.Category;
+import org.audiveris.omr.sheet.vector.VectorSymbols.Symbol;
 import org.audiveris.omr.ui.symbol.MusicFamily;
 import org.audiveris.omr.ui.symbol.MusicFont;
 import org.audiveris.omr.util.Dumping;
@@ -49,6 +52,7 @@ import org.slf4j.LoggerFactory;
 import ij.process.ByteProcessor;
 
 import java.awt.Point;
+import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -276,6 +280,10 @@ public class BlackHeadSizer
      * Small heads are searched only when the <code>smallHeads</code> switch is set, which is
      * not the default. Without it, a sheet printed with cue-size notes loses all of them.
      * An explicit (specific) switch value, set by the user, is always respected.
+     * <p>
+     * A page of a known font tells its small heads itself: a few grace notes, as the beamed
+     * pairs of the third movement of Beethoven's Pathetique sonata, are too few spots for the
+     * quorum.
      *
      * @param spots the black spots of the sheet
      */
@@ -289,6 +297,15 @@ public class BlackHeadSizer
                 ProcessingSwitch.smallHeads);
 
         if (param.isSpecific() || param.getValue()) {
+            return;
+        }
+
+        final int drawn = countDrawnSmallHeads();
+
+        if (drawn >= constants.minDrawnSmallHeads.getValue()) {
+            logger.info("{} small heads drawn, small heads enabled", drawn);
+            param.setSpecific(true);
+
             return;
         }
 
@@ -326,6 +343,28 @@ public class BlackHeadSizer
             logger.info("{} small black head spots, small heads enabled", count);
             param.setSpecific(true);
         }
+    }
+
+    //----------------------//
+    // countDrawnSmallHeads //
+    //----------------------//
+    /**
+     * Count the small heads the page draws, if it draws its heads with a known font.
+     *
+     * @return the count of drawn small heads, 0 if the page tells nothing
+     */
+    private int countDrawnSmallHeads ()
+    {
+        final VectorSymbols vectorSymbols = VectorSymbols.of(sheet);
+
+        if (vectorSymbols.isEmpty() || !vectorSymbols.isKnownFont()) {
+            return 0;
+        }
+
+        final Rectangle2D page = new Rectangle2D.Double(0, 0, sheet.getWidth(), sheet.getHeight());
+
+        return (int) vectorSymbols.intersected(Category.HEAD, page).stream().filter(Symbol::small)
+                .count();
     }
 
     //~ Inner Classes ------------------------------------------------------------------------------
@@ -404,6 +443,11 @@ public class BlackHeadSizer
         private final Constant.Ratio minSmallHeadFill = new Constant.Ratio(
                 0.6,
                 "Minimum ratio of weight to bounding box area for a small black head spot");
+
+        private final Constant.Integer minDrawnSmallHeads = new Constant.Integer(
+                "heads",
+                2,
+                "Minimum count of small heads drawn by a known font to enable small heads");
 
         private final Constant.Integer smallHeadsQuorum = new Constant.Integer(
                 "glyphs",
