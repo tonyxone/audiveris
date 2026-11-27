@@ -40,6 +40,7 @@ import org.audiveris.omr.sheet.vector.VectorChecker;
 import org.audiveris.omr.sheet.vector.VectorSymbols;
 import org.audiveris.omr.text.BlockScanner;
 import org.audiveris.omr.text.TextLine;
+import org.audiveris.omr.ui.action.AdvancedTopics;
 import org.audiveris.omr.sheet.ui.ObjectEditor.Handle;
 import org.audiveris.omr.sheet.ui.ObjectUIModel;
 import org.audiveris.omr.sheet.ui.StubsController;
@@ -1128,8 +1129,9 @@ public class OctaveShiftInter
             }
 
             final Staff staff = getOwnerStaff(glyph, sheet);
+            final SystemInfo owner = ownerSystem(staff, system);
 
-            if ((staff == null) || (staff.getSystem() != system)) {
+            if (owner == null) {
                 continue;
             }
 
@@ -1152,7 +1154,7 @@ public class OctaveShiftInter
             if (os != null) {
                 logger.debug("{} read as {}", word, os);
                 word.remove();
-                system.getSig().addVertex(os);
+                owner.getSig().addVertex(os);
             }
         }
     }
@@ -1180,7 +1182,6 @@ public class OctaveShiftInter
         }
 
         final int interline = sheet.getScale().getInterline();
-        final List<Inter> known = system.getSig().inters(OctaveShiftInter.class);
         int scans = 0;
 
         for (Point start : dottedLineStarts(buf, system.getBounds(), interline)) {
@@ -1194,16 +1195,19 @@ public class OctaveShiftInter
                 continue;
             }
 
-            // A sign already there is just confirmed: a weak one may get purged otherwise
-            final Rectangle box = glyph.getBounds();
-            final List<Inter> there = known.stream().filter(
-                    os -> ((os.getGlyph() != null) ? os.getGlyph().getBounds() : os.getBounds())
-                            .intersects(box)).toList();
             final Staff staff = getOwnerStaff(glyph, sheet);
+            final SystemInfo owner = ownerSystem(staff, system);
 
-            if ((staff == null) || (staff.getSystem() != system)) {
+            if (owner == null) {
                 continue;
             }
+
+            // A sign already there is just confirmed: a weak one may get purged otherwise
+            final Rectangle box = glyph.getBounds();
+            final List<Inter> there = owner.getSig().inters(OctaveShiftInter.class).stream()
+                    .filter(
+                            os -> ((os.getGlyph() != null) ? os.getGlyph().getBounds() : os
+                                    .getBounds()).intersects(box)).toList();
 
             scans++;
 
@@ -1241,6 +1245,8 @@ public class OctaveShiftInter
                     os.setGrade(Math.max(os.getGrade(), grade));
                 }
 
+                removeValueWords(system, box, interline);
+
                 continue;
             }
 
@@ -1248,10 +1254,71 @@ public class OctaveShiftInter
 
             if (os != null) {
                 logger.debug("{} read left of a dotted line", os);
-                system.getSig().addVertex(os);
-                known.add(os);
+                removeValueWords(system, box, interline);
+                owner.getSig().addVertex(os);
             }
         }
+    }
+
+    //------------------//
+    // removeValueWords //
+    //------------------//
+    /**
+     * Remove the words that the text recognition of the page made of an octave sign: the word
+     * over its value, and the words of its dots right after it, mostly punctuation.
+     *
+     * @param system    the system where the words were read
+     * @param box       the value bounds
+     * @param interline the staff interline
+     */
+    private static void removeValueWords (SystemInfo system,
+                                          Rectangle box,
+                                          int interline)
+    {
+        for (Inter inter : system.getSig().inters(WordInter.class)) {
+            final WordInter word = (WordInter) inter;
+
+            if (word.isRemoved() || !word.getBounds().intersects(box)) {
+                continue;
+            }
+
+            final InterEnsemble sentence = word.getEnsemble();
+            word.remove();
+
+            if (sentence == null) {
+                continue;
+            }
+
+            for (Inter member : new ArrayList<>(sentence.getMembers())) {
+                final Rectangle b = member.getBounds();
+
+                if ((member instanceof WordInter dots) && (b.x >= box.x + box.width) && ((b.x - (box.x
+                        + box.width)) <= interline) && isPunctuation(dots.getValue())) {
+                    dots.remove();
+                }
+            }
+
+            if (sentence.getMembers().isEmpty()) {
+                sentence.remove();
+            }
+        }
+    }
+
+    //---------------//
+    // isPunctuation //
+    //---------------//
+    /**
+     * Tell whether a word value is made mostly of signs other than letters and digits.
+     */
+    private static boolean isPunctuation (String value)
+    {
+        if (value.isEmpty()) {
+            return false;
+        }
+
+        final long others = value.chars().filter(c -> !Character.isLetterOrDigit(c)).count();
+
+        return others >= constants.minPunctuationRatio.getValue() * value.length();
     }
 
     //------------//
@@ -1542,6 +1609,38 @@ public class OctaveShiftInter
         }
 
         return sheet.getGlyphIndex().registerOriginal(GlyphFactory.buildGlyph(parts));
+    }
+
+    //-------------//
+    // ownerSystem //
+    //-------------//
+    /**
+     * Report the system where a sign read in a system goes: that of its staff. A sign read in
+     * the gap above the next system, but owned by its first staff, goes to that next system,
+     * which has not been linked yet when systems are processed one after the other.
+     *
+     * @param staff  the staff that owns the sign, if any
+     * @param system the system where the sign was read
+     * @return the target system, or null
+     */
+    private static SystemInfo ownerSystem (Staff staff,
+                                           SystemInfo system)
+    {
+        if (staff == null) {
+            return null;
+        }
+
+        final SystemInfo owner = staff.getSystem();
+
+        if (owner == system) {
+            return system;
+        }
+
+        if ((owner.getId() > system.getId()) && !AdvancedTopics.processSystemsInParallel()) {
+            return owner;
+        }
+
+        return null;
     }
 
     //---------------//
@@ -1989,6 +2088,10 @@ public class OctaveShiftInter
         private final Constant.Ratio maxDotLength = new Constant.Ratio(
                 0.6,
                 "Maximum length, in interlines, of a dot or dash of a dotted line");
+
+        private final Constant.Ratio minPunctuationRatio = new Constant.Ratio(
+                0.7,
+                "Minimum share of punctuation in a word read from the dots of an octave line");
 
         private final Constant.Ratio minDottedValueHeight = new Constant.Ratio(
                 1.2,
