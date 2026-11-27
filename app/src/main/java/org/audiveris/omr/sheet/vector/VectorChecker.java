@@ -119,6 +119,7 @@ public abstract class VectorChecker
 
         final Scale scale = system.getSheet().getScale();
         final double margin = scale.toPixelsDouble(constants.centerMargin);
+        final boolean drawsSmallHeads = drawsSmallHeads(vectorSymbols, system.getSheet());
 
         // Verdict on each checked inter, per category
         final Map<Category, List<Inter>> confirmed = new EnumMap<>(Category.class);
@@ -154,6 +155,21 @@ public abstract class VectorChecker
             if (!same && (kind.category == Category.DOT) && isOnAccidental(vectorSymbols, inter)) {
                 if (inter.isVip()) {
                     logger.info("VIP {} is a piece of an accidental", inter);
+                }
+
+                inter.remove();
+                continue;
+            }
+
+            // A small head the PDF does not draw, on a page that draws its small heads with a
+            // known font, is a piece of another symbol: the hook of a quarter rest in the second
+            // page of Hisaishi's Bygone Days, the slashed beams of a grace pair in the fourth one
+            // of Sakamoto's Merry Christmas Mr. Lawrence. Heads as a whole are seldom trusted at
+            // this step, their many weak candidates spoiling the agreement.
+            if (!same && drawsSmallHeads && (inter instanceof HeadInter) && inter.getShape()
+                    .isSmallHead()) {
+                if (inter.isVip()) {
+                    logger.info("VIP {} small head not drawn by the PDF", inter);
                 }
 
                 inter.remove();
@@ -323,6 +339,26 @@ public abstract class VectorChecker
 
         return isOnDigit(vectorSymbols, inter) && !vectorSymbols.intersected(Category.TIME, spot)
                 .isEmpty();
+    }
+
+    //-----------------//
+    // drawsSmallHeads //
+    //-----------------//
+    /**
+     * Tell whether the page draws small heads with a known font, as enough of them to read
+     * small heads at all.
+     */
+    private static boolean drawsSmallHeads (VectorSymbols vectorSymbols,
+                                            Sheet sheet)
+    {
+        if (!vectorSymbols.isKnownFont()) {
+            return false;
+        }
+
+        final Rectangle2D page = new Rectangle2D.Double(0, 0, sheet.getWidth(), sheet.getHeight());
+
+        return vectorSymbols.intersected(Category.HEAD, page).stream().filter(Symbol::small)
+                .count() >= constants.minDrawnSmallHeads.getValue();
     }
 
     //----------------//
@@ -1564,6 +1600,11 @@ public abstract class VectorChecker
         private final Scale.Fraction centerMargin = new Scale.Fraction(
                 0.2,
                 "Margin around a symbol center to find the drawn symbol");
+
+        private final Constant.Integer minDrawnSmallHeads = new Constant.Integer(
+                "heads",
+                2,
+                "Minimum count of drawn small heads to trust the page for them");
 
         private final Constant.Integer twinMargin = new Constant.Integer(
                 "pixels",
