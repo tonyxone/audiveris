@@ -305,10 +305,224 @@ public class BeamsBuilder
      */
     private void buildHooks ()
     {
-        for (Inter inter : sig.inters(BeamInter.class)) {
+        final List<Inter> beams = sig.inters(BeamInter.class);
+
+        for (Inter inter : beams) {
             for (VerticalSide side : VerticalSide.values()) {
                 browseHooks((BeamInter) inter, side);
             }
+        }
+
+        for (Inter inter : beams) {
+            for (VerticalSide side : VerticalSide.values()) {
+                browseStuckHooks((BeamInter) inter, side);
+            }
+        }
+    }
+
+    //------------------//
+    // browseStuckHooks //
+    //------------------//
+    /**
+     * Look for hooks stuck on a vertical side of a beam.
+     * <p>
+     * A hook printed (or scanned) too close to its beam is merged with the beam in the same spot,
+     * so it is not seen as a separate spot by {@link #browseHooks}.
+     * We look along the beam, just beyond its border, for a run of columns as thick as a beam
+     * and as wide as a hook.
+     *
+     * @param beam the base beam
+     * @param side which vertical side to browse
+     */
+    private void browseStuckHooks (BeamInter beam,
+                                   VerticalSide side)
+    {
+        final ItemParameters itemParams = getItemParams(beam);
+
+        if (itemParams.isSmall || (beam.getGrade() < constants.minStuckHookBaseGrade.getValue())) {
+            return;
+        }
+
+        final Line2D median = beam.getMedian();
+        final double height = beam.getHeight();
+        final double dir = (side == TOP) ? -1 : 1;
+        final int x1 = (int) Math.ceil(median.getX1());
+        final int x2 = (int) Math.floor(median.getX2());
+        final int maxY = pixelFilter.getHeight() - 1;
+        final int maxX = pixelFilter.getWidth() - 1;
+
+        // Black pixels per column, beyond the beam border, within a beam height
+        final int gap = 2;
+        final int span = (int) Math.rint(height);
+        final int[] counts = new int[x2 - x1 + 1];
+        final double[] centers = new double[counts.length];
+
+        for (int x = x1; x <= Math.min(x2, maxX); x++) {
+            final double border = LineUtil.yAtX(median, x) + (dir * height / 2);
+            int count = 0;
+            double sum = 0;
+
+            for (int k = gap; k < (gap + span); k++) {
+                final int y = (int) Math.rint(border + (dir * k));
+
+                if ((y >= 0) && (y <= maxY) && (pixelFilter.get(x, y) == 0)) {
+                    count++;
+                    sum += y;
+                }
+            }
+
+            counts[x - x1] = count;
+            centers[x - x1] = (count > 0) ? (sum / count) : 0;
+        }
+
+        // Runs of thick enough columns
+        final double minCount = itemParams.minHeightLow - gap;
+        int start = -1;
+
+        for (int i = 0; i <= counts.length; i++) {
+            final boolean thick = (i < counts.length) && (counts[i] >= minCount);
+
+            if (thick && (start == -1)) {
+                start = i;
+            } else if (!thick && (start != -1)) {
+                checkStuckHook(beam, side, x1 + start, x1 + i - 1, centers, start, i, itemParams);
+                start = -1;
+            }
+        }
+    }
+
+    //----------------//
+    // hasStemThrough //
+    //----------------//
+    /**
+     * Check whether a stem goes through the hook candidate and goes on beyond it.
+     * <p>
+     * A hook lies on the stems side of its beam, so one of its stems goes on to its head,
+     * unlike a fingering or any other mark lying on the other side of the beam.
+     *
+     * @param beam the base beam
+     * @param side the vertical side of beam
+     * @param xa   hook first abscissa
+     * @param xb   hook last abscissa
+     * @return true if found
+     */
+    private boolean hasStemThrough (BeamInter beam,
+                                    VerticalSide side,
+                                    int xa,
+                                    int xb)
+    {
+        final Line2D median = beam.getMedian();
+        final double height = beam.getHeight();
+        final double dir = (side == TOP) ? -1 : 1;
+        final int interline = sheet.getInterline();
+        final int margin = 2;
+
+        for (int x = Math.max(0, xa - margin); x <= Math.min(pixelFilter.getWidth() - 1, xb
+                + margin); x++) {
+            // Beyond the hook, which is about one beam height beyond the beam border
+            final double start = LineUtil.yAtX(median, x) + (dir * ((height / 2) + (2 * height)));
+            int count = 0;
+
+            for (int k = 0; k < interline; k++) {
+                final int y = (int) Math.rint(start + (dir * k));
+
+                if ((y >= 0) && (y < pixelFilter.getHeight()) && (pixelFilter.get(x, y) == 0)) {
+                    count++;
+                }
+            }
+
+            if (count >= (0.8 * interline)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    //----------------//
+    // checkStuckHook //
+    //----------------//
+    /**
+     * Check a run of thick columns along a beam as a hook stuck on the beam.
+     *
+     * @param beam       the base beam
+     * @param side       the vertical side of beam
+     * @param xa         run first abscissa
+     * @param xb         run last abscissa
+     * @param centers    per column, the mean ordinate of black pixels beyond beam border
+     * @param ia         run first index in centers
+     * @param ib         run index after last in centers
+     * @param itemParams parameters for beam items
+     */
+    private void checkStuckHook (BeamInter beam,
+                                 VerticalSide side,
+                                 int xa,
+                                 int xb,
+                                 double[] centers,
+                                 int ia,
+                                 int ib,
+                                 ItemParameters itemParams)
+    {
+        final int width = xb - xa + 1;
+
+        if ((width < itemParams.minHookWidthLow) || (width > itemParams.maxHookWidth)) {
+            return;
+        }
+
+        // A hook as long as its beam would rather be a second beam
+        final double beamWidth = beam.getMedian().getX2() - beam.getMedian().getX1();
+
+        if (width > (constants.maxStuckHookBeamRatio.getValue() * beamWidth)) {
+            return;
+        }
+
+        if (!hasStemThrough(beam, side, xa, xb)) {
+            return;
+        }
+
+        final Line2D beamMedian = beam.getMedian();
+        final double slope = LineUtil.getSlope(beamMedian);
+        double dy = 0;
+
+        for (int i = ia; i < ib; i++) {
+            dy += centers[i] - LineUtil.yAtX(beamMedian, xa + (i - ia));
+        }
+
+        dy /= (ib - ia);
+
+        final double height = beam.getHeight();
+        final double offset = Math.signum(dy) * Math.max(Math.abs(dy), height);
+        final Line2D median = new Line2D.Double(
+                xa,
+                LineUtil.yAtX(beamMedian, xa) + offset,
+                xb + 1,
+                LineUtil.yAtX(beamMedian, xa) + offset + (slope * (xb + 1 - xa)));
+        final BeamItem item = new BeamItem(median, height);
+
+        if (overlap(item) || touchesOtherBeam(item, beam)) {
+            return;
+        }
+
+        final double distImpact = ((Impacts) beam.getImpacts()).getDistImpact();
+        final Impacts impacts = computeImpacts(
+                item,
+                side == TOP,
+                side == BOTTOM,
+                itemParams.minHookWidthLow,
+                itemParams.minHookWidthHigh,
+                distImpact,
+                itemParams);
+
+        if ((impacts != null) && (impacts.getGrade() >= BeamHookInter.getMinGrade())) {
+            final BeamHookInter hook = new BeamHookInter(impacts, median, height);
+
+            if (beam.isVip()) {
+                hook.setVip(true);
+            }
+
+            logger.debug("{} stuck on {}", hook, beam);
+            registerBeam(hook);
+            rawSystemBeams.add(hook);
         }
     }
 
@@ -1495,6 +1709,41 @@ public class BeamsBuilder
         return false;
     }
 
+    //------------------//
+    // touchesOtherBeam //
+    //------------------//
+    /**
+     * Check whether the provided (stuck hook) item touches any existing beam or hook
+     * other than its base beam.
+     * <p>
+     * A hook already found as a separate spot lies right there, and {@link #overlap} may miss
+     * it when the item center falls just outside of it.
+     *
+     * @param item the item to check
+     * @param base the base beam
+     * @return true if so
+     */
+    private boolean touchesOtherBeam (BeamItem item,
+                                      AbstractBeamInter base)
+    {
+        final Area itemCore = item.getCoreArea();
+
+        for (Inter inter : Inters.intersectedInters(rawSystemBeams, GeoOrder.NONE, itemCore)) {
+            if ((inter == base) || inter.isRemoved()) {
+                continue;
+            }
+
+            final Area common = new Area(itemCore);
+            common.intersect(((AbstractBeamInter) inter).getArea());
+
+            if (!common.isEmpty()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     //--------------//
     // registerBeam //
     //--------------//
@@ -1737,6 +1986,14 @@ public class BeamsBuilder
         private final Scale.Fraction maxDistanceToBorder = new Scale.Fraction(
                 0.15,
                 "Maximum mean distance to average beam border");
+
+        private final Constant.Ratio minStuckHookBaseGrade = new Constant.Ratio(
+                0.3,
+                "Minimum grade of a beam to look for a hook stuck on it");
+
+        private final Constant.Ratio maxStuckHookBeamRatio = new Constant.Ratio(
+                0.6,
+                "Maximum width of a stuck hook, as ratio of its beam width");
 
         private final Constant.Ratio maxJitterRatio = new Constant.Ratio(
                 0.02,
