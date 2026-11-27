@@ -1167,6 +1167,123 @@ public abstract class VectorChecker
         // heads to be trusted, and a font whose drawn heads lie off the read ones, as the one of
         // Bach's first Invention, would then remove the well read heads
         removeVoidGhosts(system);
+        preferDrawnPitches(system);
+    }
+
+    //--------------------//
+    // preferDrawnPitches //
+    //--------------------//
+    /**
+     * On a page of a known font, let the head read right on a drawn head beat the stronger
+     * heads that overlap it and that the page does not draw.
+     * <p>
+     * A void head drawn on a ledger, with another ledger just above, may match its template
+     * better between the two ledgers than on its own, as the chords of the third page of
+     * Beethoven's fifth symphony: the stronger head is then a step too high, while a weaker
+     * one lies right on the drawn head.
+     * <p>
+     * Of the heads centered on a drawn head, of its kind and size, only the best centered one
+     * is kept from its undrawn competitors, which it takes the grade of.
+     * <p>
+     * An undrawn head of the other size goes as well, even weaker: once a page reads small
+     * heads, a small black head fits well inside a drawn standard one, gets a stem of its own
+     * and breaks the chord, as the third of the fourth page of Sakamoto's Merry Christmas Mr.
+     * Lawrence.
+     *
+     * @param system the system to process
+     */
+    private static void preferDrawnPitches (SystemInfo system)
+    {
+        final Sheet sheet = system.getSheet();
+        final VectorSymbols vectorSymbols = VectorSymbols.of(sheet);
+
+        if (vectorSymbols.isEmpty() || !vectorSymbols.isKnownFont()) {
+            return;
+        }
+
+        final double margin = sheet.getScale().toPixelsDouble(constants.centerMargin);
+        final List<Inter> heads = system.getSig().inters(HeadInter.class);
+
+        // The best centered head on each drawn head
+        final Map<Symbol, Inter> best = new LinkedHashMap<>();
+
+        for (Inter head : heads) {
+            final Kind kind = kindOf(head);
+
+            if (head.isRemoved() || (kind == null)) {
+                continue;
+            }
+
+            final Point center = head.getCenter();
+            final Rectangle2D spot = new Rectangle2D.Double(
+                    center.x - margin,
+                    center.y - margin,
+                    2 * margin,
+                    2 * margin);
+
+            for (Symbol symbol : vectorSymbols.intersected(kind.category, spot)) {
+                if ((symbol.kind() == kind) && isCentered(center, symbol, margin) && sizeFits(
+                        head,
+                        symbol)) {
+                    final Inter other = best.get(symbol);
+
+                    if ((other == null) || (offset(head, symbol) < offset(other, symbol))) {
+                        best.put(symbol, head);
+                    }
+                }
+            }
+        }
+
+        for (Inter head : new LinkedHashSet<>(best.values())) {
+            if (head.isRemoved()) {
+                continue;
+            }
+
+            final boolean small = head.getShape().isSmallHead();
+
+            for (Inter other : heads) {
+                if ((other == head) || other.isRemoved()
+                        || !other.getBounds().intersects(head.getBounds())) {
+                    continue;
+                }
+
+                // A weaker head is left to the competition, unless not of the drawn size
+                final boolean stronger = other.getGrade() > head.getGrade();
+
+                if (!stronger && (other.getShape().isSmallHead() == small)) {
+                    continue;
+                }
+
+                final Kind otherKind = kindOf(other);
+
+                if ((otherKind == null) || isDrawn(vectorSymbols, other, otherKind, margin)) {
+                    continue;
+                }
+
+                if (head.isVip() || other.isVip()) {
+                    logger.info("VIP {} drawn, beats {}", head, other);
+                }
+
+                if (stronger) {
+                    head.setGrade(other.getGrade());
+                }
+
+                other.remove();
+            }
+        }
+    }
+
+    /**
+     * Report how far the center of a recognized symbol lies from the center of a drawn one.
+     */
+    private static double offset (Inter inter,
+                                  Symbol symbol)
+    {
+        final Point center = inter.getCenter();
+
+        return Math.hypot(
+                center.x - symbol.bounds().getCenterX(),
+                center.y - symbol.bounds().getCenterY());
     }
 
     //------------------//
