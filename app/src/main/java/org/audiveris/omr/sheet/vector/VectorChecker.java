@@ -148,6 +148,18 @@ public abstract class VectorChecker
                 inter.remove();
                 continue;
             }
+
+            // So is a dot on an accidental the PDF draws, as the bit of a sharp's right stem left
+            // out once small heads are read, which made a dotted note in Mozart's Rondo alla Turca
+            if (!same && (kind.category == Category.DOT) && isOnAccidental(vectorSymbols, inter)) {
+                if (inter.isVip()) {
+                    logger.info("VIP {} is a piece of an accidental", inter);
+                }
+
+                inter.remove();
+                continue;
+            }
+
             // A staccato read where a full font draws no dot at all is not there either, whatever
             // the trust in dots, which augmentation dots read off their place may spoil
             if (!same && (kind == Kind.STACCATO) && vectorSymbols.isFullFont() && !isConfused(
