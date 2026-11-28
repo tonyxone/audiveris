@@ -2406,6 +2406,15 @@ public class PartwiseBuilder
                     AbstractChordInter chord = voice.getWholeChord();
                     clefIters.push(measure.getWidth(), chord.getTopStaff());
                     wedgeIters.push(chord.getTimeOffset());
+
+                    // Unlinked small chords (e.g. a cadenza) left of the rest, drawn in the
+                    // middle of the measure, as in the cadenza of Liszt's third Liebestraum
+                    final List<SmallChordInter> orphans = orphanGraces.get(chord);
+
+                    if (orphans != null) {
+                        processOrphans(orphans);
+                    }
+
                     processChord(chord);
 
                     if (stack.getActualDuration() != null) {

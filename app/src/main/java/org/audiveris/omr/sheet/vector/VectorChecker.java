@@ -59,6 +59,7 @@ import ij.process.ByteProcessor;
 
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.util.AbstractMap;
 import java.util.ArrayList;
@@ -118,6 +119,7 @@ public abstract class VectorChecker
 
         final Scale scale = system.getSheet().getScale();
         final double margin = scale.toPixelsDouble(constants.centerMargin);
+        final boolean drawsSmallHeads = drawsSmallHeads(vectorSymbols, system.getSheet());
 
         // Verdict on each checked inter, per category
         final Map<Category, List<Inter>> confirmed = new EnumMap<>(Category.class);
@@ -147,6 +149,33 @@ public abstract class VectorChecker
                 inter.remove();
                 continue;
             }
+
+            // So is a dot on an accidental the PDF draws, as the bit of a sharp's right stem left
+            // out once small heads are read, which made a dotted note in Mozart's Rondo alla Turca
+            if (!same && (kind.category == Category.DOT) && isOnAccidental(vectorSymbols, inter)) {
+                if (inter.isVip()) {
+                    logger.info("VIP {} is a piece of an accidental", inter);
+                }
+
+                inter.remove();
+                continue;
+            }
+
+            // A small head the PDF does not draw, on a page that draws its small heads with a
+            // known font, is a piece of another symbol: the hook of a quarter rest in the second
+            // page of Hisaishi's Bygone Days, the slashed beams of a grace pair in the fourth one
+            // of Sakamoto's Merry Christmas Mr. Lawrence. Heads as a whole are seldom trusted at
+            // this step, their many weak candidates spoiling the agreement.
+            if (!same && drawsSmallHeads && (inter instanceof HeadInter) && inter.getShape()
+                    .isSmallHead()) {
+                if (inter.isVip()) {
+                    logger.info("VIP {} small head not drawn by the PDF", inter);
+                }
+
+                inter.remove();
+                continue;
+            }
+
             // A staccato read where a full font draws no dot at all is not there either, whatever
             // the trust in dots, which augmentation dots read off their place may spoil
             if (!same && (kind == Kind.STACCATO) && vectorSymbols.isFullFont() && !isConfused(
@@ -310,6 +339,26 @@ public abstract class VectorChecker
 
         return isOnDigit(vectorSymbols, inter) && !vectorSymbols.intersected(Category.TIME, spot)
                 .isEmpty();
+    }
+
+    //-----------------//
+    // drawsSmallHeads //
+    //-----------------//
+    /**
+     * Tell whether the page draws small heads with a known font, as enough of them to read
+     * small heads at all.
+     */
+    private static boolean drawsSmallHeads (VectorSymbols vectorSymbols,
+                                            Sheet sheet)
+    {
+        if (!vectorSymbols.isKnownFont()) {
+            return false;
+        }
+
+        final Rectangle2D page = new Rectangle2D.Double(0, 0, sheet.getWidth(), sheet.getHeight());
+
+        return vectorSymbols.intersected(Category.HEAD, page).stream().filter(Symbol::small)
+                .count() >= constants.minDrawnSmallHeads.getValue();
     }
 
     //----------------//
@@ -1161,6 +1210,267 @@ public abstract class VectorChecker
     public static void checkHeads (SystemInfo system)
     {
         check(system, system.getSig().inters(HeadInter.class));
+
+        // Only once checked: the ghosts left out, a page may agree enough with the PDF for its
+        // heads to be trusted, and a font whose drawn heads lie off the read ones, as the one of
+        // Bach's first Invention, would then remove the well read heads
+        removeVoidGhosts(system);
+        preferDrawnPitches(system);
+    }
+
+    //--------------------//
+    // preferDrawnPitches //
+    //--------------------//
+    /**
+     * On a page of a known font, let the head read right on a drawn head beat the stronger
+     * heads that overlap it and that the page does not draw.
+     * <p>
+     * A void head drawn on a ledger, with another ledger just above, may match its template
+     * better between the two ledgers than on its own, as the chords of the third page of
+     * Beethoven's fifth symphony: the stronger head is then a step too high, while a weaker
+     * one lies right on the drawn head.
+     * <p>
+     * Of the heads centered on a drawn head, of its kind and size, only the best centered one
+     * is kept from its undrawn competitors, which it takes the grade of.
+     * <p>
+     * An undrawn head of the other size goes as well, even weaker: once a page reads small
+     * heads, a small black head fits well inside a drawn standard one, gets a stem of its own
+     * and breaks the chord, as the third of the fourth page of Sakamoto's Merry Christmas Mr.
+     * Lawrence.
+     *
+     * @param system the system to process
+     */
+    private static void preferDrawnPitches (SystemInfo system)
+    {
+        final Sheet sheet = system.getSheet();
+        final VectorSymbols vectorSymbols = VectorSymbols.of(sheet);
+
+        if (vectorSymbols.isEmpty() || !vectorSymbols.isKnownFont()) {
+            return;
+        }
+
+        final double margin = sheet.getScale().toPixelsDouble(constants.centerMargin);
+        final List<Inter> heads = system.getSig().inters(HeadInter.class);
+
+        // The best centered head on each drawn head
+        final Map<Symbol, Inter> best = new LinkedHashMap<>();
+
+        for (Inter head : heads) {
+            final Kind kind = kindOf(head);
+
+            if (head.isRemoved() || (kind == null)) {
+                continue;
+            }
+
+            final Point center = head.getCenter();
+            final Rectangle2D spot = new Rectangle2D.Double(
+                    center.x - margin,
+                    center.y - margin,
+                    2 * margin,
+                    2 * margin);
+
+            for (Symbol symbol : vectorSymbols.intersected(kind.category, spot)) {
+                if ((symbol.kind() == kind) && isCentered(center, symbol, margin) && sizeFits(
+                        head,
+                        symbol)) {
+                    final Inter other = best.get(symbol);
+
+                    if ((other == null) || (offset(head, symbol) < offset(other, symbol))) {
+                        best.put(symbol, head);
+                    }
+                }
+            }
+        }
+
+        for (Inter head : new LinkedHashSet<>(best.values())) {
+            if (head.isRemoved()) {
+                continue;
+            }
+
+            final boolean small = head.getShape().isSmallHead();
+
+            for (Inter other : heads) {
+                if ((other == head) || other.isRemoved()
+                        || !other.getBounds().intersects(head.getBounds())) {
+                    continue;
+                }
+
+                // A weaker head is left to the competition, unless not of the drawn size
+                final boolean stronger = other.getGrade() > head.getGrade();
+
+                if (!stronger && (other.getShape().isSmallHead() == small)) {
+                    continue;
+                }
+
+                final Kind otherKind = kindOf(other);
+
+                if ((otherKind == null) || isDrawn(vectorSymbols, other, otherKind, margin)) {
+                    continue;
+                }
+
+                if (head.isVip() || other.isVip()) {
+                    logger.info("VIP {} drawn, beats {}", head, other);
+                }
+
+                if (stronger) {
+                    head.setGrade(other.getGrade());
+                }
+
+                other.remove();
+            }
+        }
+    }
+
+    /**
+     * Report how far the center of a recognized symbol lies from the center of a drawn one.
+     */
+    private static double offset (Inter inter,
+                                  Symbol symbol)
+    {
+        final Point center = inter.getCenter();
+
+        return Math.hypot(
+                center.x - symbol.bounds().getCenterX(),
+                center.y - symbol.bounds().getCenterY());
+    }
+
+    //------------------//
+    // removeVoidGhosts //
+    //------------------//
+    /**
+     * Remove the void heads read where a page of a known font draws a black head and no hollow
+     * one.
+     * <p>
+     * The white gap between two black heads a third apart, crossed by a staff line or a ledger,
+     * reads as a void head between them, as the small thirds of the cadenza in Liszt's third
+     * Liebestraum. So does a small black head with the line above it, as the grace arpeggios of
+     * Mozart's Rondo alla Turca. Such a void head, held by the stem, then beats the drawn heads.
+     * <p>
+     * A void head is kept when a drawn black head under it is not read as a black head, since it
+     * then gives the only pitch read there.
+     *
+     * @param system the system to process
+     */
+    private static void removeVoidGhosts (SystemInfo system)
+    {
+        final VectorSymbols vectorSymbols = VectorSymbols.of(system.getSheet());
+
+        if (vectorSymbols.isEmpty() || !vectorSymbols.isKnownFont()) {
+            return;
+        }
+
+        final List<Inter> heads = system.getSig().inters(HeadInter.class);
+
+        for (Inter inter : heads) {
+            final Shape shape = inter.getShape();
+
+            if (inter.isRemoved() || ((shape != Shape.NOTEHEAD_VOID)
+                    && (shape != Shape.NOTEHEAD_VOID_SMALL))) {
+                continue;
+            }
+
+            final Rectangle box = inter.getBounds();
+
+            if (hasBlackTwin(inter, heads)) {
+                continue; // Just the other shape read on a drawn head, left to the competition
+            }
+
+            final List<Symbol> drawn = vectorSymbols.intersected(Category.HEAD, box);
+
+            if (drawn.stream().anyMatch(s -> s.kind() != Kind.HEAD_BLACK)) {
+                continue; // A hollow head is drawn there
+            }
+
+            final Rectangle2D area = new Rectangle2D.Double(
+                    box.x - 1,
+                    box.y - 1,
+                    box.width + 2,
+                    box.height + 2);
+
+            final List<Symbol> inside = new ArrayList<>();
+
+            for (Symbol symbol : drawn) {
+                if (area.contains(symbol.bounds().getCenterX(), symbol.bounds().getCenterY())) {
+                    inside.add(symbol);
+                }
+            }
+
+            // Each drawn head must be read as a black head, else the void one is its only note
+            if (!inside.isEmpty() && inside.stream().allMatch(s -> isReadBlack(s, heads))) {
+                if (inter.isVip()) {
+                    logger.info("VIP {} is a ghost of drawn black heads", inter);
+                }
+
+                inter.remove();
+            }
+        }
+    }
+
+    //--------------//
+    // hasBlackTwin //
+    //--------------//
+    /**
+     * Tell whether a void head was read at the very place of a black head.
+     * <p>
+     * Such a void head is no ghost but the other shape tried on a drawn head. It loses to the
+     * black one, unless the black one fails on its stem, as on the ledgers of a chord whose lower
+     * head reads badly as a black head, or on a head shared by an up and a down stem: the void
+     * head then gives the only note read there.
+     *
+     * @param inter the void head
+     * @param heads the heads read in the system
+     * @return true if a black head is centered on it
+     */
+    private static boolean hasBlackTwin (Inter inter,
+                                         List<Inter> heads)
+    {
+        final Point2D center = inter.getCenter2D();
+        final double margin = constants.twinMargin.getValue();
+
+        for (Inter head : heads) {
+            final Shape shape = head.getShape();
+
+            if (!head.isRemoved() && ((shape == Shape.NOTEHEAD_BLACK)
+                    || (shape == Shape.NOTEHEAD_BLACK_SMALL))) {
+                final Point2D c = head.getCenter2D();
+
+                if ((Math.abs(c.getX() - center.getX()) <= margin)
+                        && (Math.abs(c.getY() - center.getY()) <= margin)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    //-------------//
+    // isReadBlack //
+    //-------------//
+    /**
+     * Tell whether a drawn head is read as a black head.
+     *
+     * @param symbol the drawn head
+     * @param heads  the heads read in the system
+     * @return true if a black head read holds the center of the drawn one
+     */
+    private static boolean isReadBlack (Symbol symbol,
+                                        List<Inter> heads)
+    {
+        final double x = symbol.bounds().getCenterX();
+        final double y = symbol.bounds().getCenterY();
+
+        for (Inter head : heads) {
+            final Shape shape = head.getShape();
+
+            if (!head.isRemoved() && ((shape == Shape.NOTEHEAD_BLACK)
+                    || (shape == Shape.NOTEHEAD_BLACK_SMALL))
+                    && head.getBounds().contains(x, y)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     //--------------//
@@ -1290,6 +1600,16 @@ public abstract class VectorChecker
         private final Scale.Fraction centerMargin = new Scale.Fraction(
                 0.2,
                 "Margin around a symbol center to find the drawn symbol");
+
+        private final Constant.Integer minDrawnSmallHeads = new Constant.Integer(
+                "heads",
+                2,
+                "Minimum count of drawn small heads to trust the page for them");
+
+        private final Constant.Integer twinMargin = new Constant.Integer(
+                "pixels",
+                2,
+                "Maximum offset between the centers of a void head and a black head on one place");
 
         private final Constant.Ratio minClefOverlap = new Constant.Ratio(
                 0.5,

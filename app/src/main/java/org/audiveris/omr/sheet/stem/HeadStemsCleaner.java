@@ -29,6 +29,7 @@ import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.StemInter;
 import org.audiveris.omr.sig.relation.Exclusion;
 import org.audiveris.omr.sig.relation.HeadStemRelation;
+import org.audiveris.omr.sig.relation.Relation;
 import static org.audiveris.omr.util.HorizontalSide.LEFT;
 
 import org.slf4j.Logger;
@@ -117,8 +118,13 @@ public class HeadStemsCleaner
         if (rels.size() == 2) {
             // If not canonical, try to discard one of the stem links
             if (!isCanonicalShare()) {
-                // Discard the relation with smallest contribution
-                HeadStemRelation discarded = discardWorstContribution(rels);
+                // Discard the link on the abnormal side, if only one is, else the relation with
+                // smallest contribution
+                HeadStemRelation discarded = discardAbnormalSide();
+
+                if (discarded == null) {
+                    discarded = discardWorstContribution(rels);
+                }
 
                 if (discarded != null) {
                     sig.removeEdge(discarded);
@@ -126,6 +132,82 @@ public class HeadStemsCleaner
                 }
             }
         }
+    }
+
+    //---------------------//
+    // discardAbnormalSide //
+    //---------------------//
+    /**
+     * Discard the only link with the head on the abnormal side of its stem, unless another
+     * head one step away lies on the normal side, as in a chord second.
+     * <p>
+     * Otherwise the stronger link may be the wrong one, which the reducer cuts later on,
+     * leaving the head with no stem at all: the middle note of the grace arpeggio that starts
+     * the 25th bar of Mozart's Rondo alla Turca reached the stem of its left neighbor.
+     *
+     * @return the link to discard, or null
+     */
+    private HeadStemRelation discardAbnormalSide ()
+    {
+        HeadStemRelation abnormal = null;
+
+        for (HeadStemRelation rel : rels) {
+            if (!isNormalSide(rel)) {
+                if (abnormal != null) {
+                    return null; // Both abnormal
+                }
+
+                abnormal = rel;
+            }
+        }
+
+        if (abnormal == null) {
+            return null;
+        }
+
+        final StemInter stem = (StemInter) sig.getEdgeTarget(abnormal);
+        final int pitch = head.getIntegerPitch();
+
+        for (Relation rel : sig.getRelations(stem, HeadStemRelation.class)) {
+            final HeadStemRelation hsRel = (HeadStemRelation) rel;
+            final HeadInter other = (HeadInter) sig.getEdgeSource(rel);
+
+            if ((other != head) && (hsRel.getHeadSide() != abnormal.getHeadSide()) && (other
+                    .getStaff() == head.getStaff()) && (Math.abs(other.getIntegerPitch()
+                            - pitch) <= 1)) {
+                return null; // A second
+            }
+        }
+
+        if (head.isVip()) {
+            logger.info("VIP {} discarding abnormal side {}", head, stem);
+        }
+
+        return abnormal;
+    }
+
+    //--------------//
+    // isNormalSide //
+    //--------------//
+    /**
+     * Tell whether the head lies on the normal side of the stem: left of a stem going up,
+     * right of a stem going down, as the reducer will check it.
+     * <p>
+     * The relation side is the side of the head where the stem lies. The stem direction comes
+     * from what is found on its ends, not from its location around the head: the top head of
+     * an up chord lies above the stem center.
+     * A stem of unknown direction is taken as normal.
+     */
+    private boolean isNormalSide (HeadStemRelation rel)
+    {
+        final StemInter stem = (StemInter) sig.getEdgeTarget(rel);
+        final int dir = stem.computeDirection();
+
+        if (dir == 0) {
+            return true;
+        }
+
+        return (rel.getHeadSide() == LEFT) == (dir > 0);
     }
 
     //-----------------//
