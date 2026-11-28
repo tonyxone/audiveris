@@ -302,6 +302,19 @@ public class BeamLinker
      */
     private void equipStumps ()
     {
+        // Retrieve vertical directions when going away from beam
+        final Map<Glyph, Set<VerticalSide>> stumpDirections = new LinkedHashMap<>();
+        final Set<VerticalSide> beamDirections = EnumSet.noneOf(VerticalSide.class);
+
+        for (Glyph stump : stumps) {
+            final Set<VerticalSide> directions = getStumpDirections(stump);
+            stumpDirections.put(stump, directions);
+
+            if (directions != null) {
+                beamDirections.addAll(directions);
+            }
+        }
+
         for (Glyph stump : stumps) {
             if (stump.isVip()) {
                 logger.info("VIP {} equipStump at {}", this, stump);
@@ -317,9 +330,14 @@ public class BeamLinker
             }
 
             final BLinker bLinker = new BLinker(stump, hSide, null, false);
+            Set<VerticalSide> directions = stumpDirections.get(stump);
 
-            // Retrieve vertical directions when going away from beam
-            final Set<VerticalSide> directions = getStumpDirections(stump);
+            // A side stump hardly out of the beam gives no direction by itself:
+            // use the directions of the other stumps, or else look both ways
+            if ((directions != null) && directions.isEmpty() && (hSide != null)) {
+                directions = beamDirections.isEmpty() ? EnumSet.allOf(VerticalSide.class)
+                        : beamDirections;
+            }
 
             if (directions != null) {
                 for (VerticalSide vSide : directions) {
