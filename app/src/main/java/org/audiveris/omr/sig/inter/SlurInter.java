@@ -431,6 +431,9 @@ public class SlurInter
     /**
      * Check whether this slur is a tie within the same staff,
      * with no check for mirror heads potential mirrors.
+     * <p>
+     * A slur from a grace note to its main note of the same pitch is not a tie
+     * (Chopin Ballade 1 bar 258: octaves led by a grace note lost their main note).
      *
      * @param systemHeadChords system head chords, not null
      */
@@ -443,12 +446,48 @@ public class SlurInter
         HeadInter h1 = getHead(LEFT);
         HeadInter h2 = getHead(RIGHT);
         boolean result = (h1 != null) && (h2 != null) && (h1.getStaff() == h2.getStaff())
-                && areTieCompatible(h1, h2) && isSpaceClear(h1, h2, systemHeadChords);
+                && areTieCompatible(h1, h2) && isSpaceClear(h1, h2, systemHeadChords)
+                && !(isDetached(h1) && isDetached(h2))
+                && (h1.getShape().isSmallHead() == h2.getShape().isSmallHead());
         setTie(result);
 
         if (isVip()) {
             logger.info("VIP {} {}", result ? "Tie" : "Slur", this);
         }
+    }
+
+    //------------//
+    // isDetached //
+    //------------//
+    /**
+     * Tell whether the head is played detached.
+     * <p>
+     * A slur over two staccato notes of the same pitch is a portato, not a tie
+     * (Chopin Ballade 1 bar 9: two staccato chords under a short slur, the second one was lost).
+     * A staccato on the left note only does not prevent a tie
+     * (Liszt Consolation 1 bar 2: a staccato chord tied over the barline).
+     *
+     * @param head a head of the slur
+     * @return true if its chord carries a staccato or a staccatissimo
+     */
+    private static boolean isDetached (HeadInter head)
+    {
+        final HeadChordInter chord = head.getChord();
+
+        if (chord == null) {
+            return false;
+        }
+
+        for (ArticulationInter art : chord.getArticulations()) {
+            final Shape shape = art.getShape();
+
+            if ((shape == Shape.STACCATO) || (shape == Shape.STACCATISSIMO)
+                    || (shape == Shape.STACCATISSIMO_BELOW)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     //----------//
