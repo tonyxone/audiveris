@@ -1198,6 +1198,70 @@ public class PartwiseBuilder
         }
     }
 
+    //--------------//
+    // hasNumberOne //
+    //--------------//
+    /**
+     * Tell whether the exported ending number includes 1 (as in "1" or "1,2").
+     *
+     * @param number exported ending number, perhaps null
+     * @return true if 1 is one of the numbers
+     */
+    private static boolean hasNumberOne (String number)
+    {
+        if (number == null) {
+            return false;
+        }
+
+        for (String num : number.split(",")) {
+            if (num.equals("1")) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    //---------------//
+    // isFirstEnding //
+    //---------------//
+    /**
+     * Tell whether the provided ending, starting in current measure, is the first ending of
+     * its repeat: no ending stops just before it and a backward repeat closes it.
+     *
+     * @param ending the ending starting at current measure
+     * @return true if first ending
+     */
+    private boolean isFirstEnding (EndingInter ending)
+    {
+        if (ending.getLeftLeg() == null) {
+            return false; // Continuation of an ending from the previous line
+        }
+
+        final Measure prevMeasure = current.measure.getPrecedingInScore();
+
+        if (prevMeasure != null) {
+            final PartBarline prevBar = prevMeasure.getRightPartBarline();
+
+            if ((prevBar != null) && (prevBar.getEnding(RIGHT) != null)) {
+                return false;
+            }
+        }
+
+        // The ending must stop on a backward repeat
+        final List<Measure> measures = current.measure.getPart().getMeasures();
+
+        for (Measure m : measures.subList(measures.indexOf(current.measure), measures.size())) {
+            final PartBarline bar = m.getRightPartBarline();
+
+            if ((bar != null) && (bar.getEnding(RIGHT) == ending)) {
+                return m.getStack().isRepeat(RIGHT);
+            }
+        }
+
+        return false;
+    }
+
     //----------------//
     // processBarline //
     //----------------//
@@ -1227,6 +1291,10 @@ public class PartwiseBuilder
             final String endingValue = (ending != null) ? ending.getValue() : null;
             String endingNumber = (ending != null) ? ending.getExportedNumber() : null;
 
+            if ((endingNumber != null) && !endingNumber.matches(".*[0-9].*")) {
+                endingNumber = null; // No digit read, to be inferred
+            }
+
             if (endingNumber == null && ending != null) {
                 // Try to infer an endingNumber
                 boolean isFirstNumber = true;
@@ -1249,6 +1317,14 @@ public class PartwiseBuilder
 
                 ending.setNumber(endingNumber = (continuedNumber != null) ? continuedNumber
                         : (isFirstNumber ? "1" : "2"));
+            }
+
+            if ((ending != null) && (location == RightLeftMiddle.LEFT)
+                    && !hasNumberOne(endingNumber) && isFirstEnding(ending)) {
+                // A first ending is played on the first pass, whatever the number read says
+                logger.info("{} first ending number \"{}\" read as \"1\"",
+                        current.measure, endingNumber);
+                ending.setNumber(endingNumber = "1");
             }
 
             // Is export of barline element really needed? MusicXML says that if we just have a
