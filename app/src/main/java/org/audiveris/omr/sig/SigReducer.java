@@ -365,7 +365,9 @@ public class SigReducer
                     // judged of standard size
                     if (!BeamLinker.allowSmallHeadOnStandardBeam()) {
                         final Set<Inter> mixedBeams = new LinkedHashSet<>(beamSet);
-                        mixedBeams.removeIf(beam -> bearsOnlySmallHeads((AbstractBeamInter) beam));
+                        mixedBeams.removeIf(
+                                beam -> isThin((AbstractBeamInter) beam) || bearsOnlySmallHeads(
+                                        (AbstractBeamInter) beam));
 
                         for (Shape small : ShapeSet.HeadsOvalSmall) {
                             final Set<Inter> smallHeadSet = heads.get(small);
@@ -378,6 +380,19 @@ public class SigReducer
                 }
             }
         }
+    }
+
+    //--------//
+    // isThin //
+    //--------//
+    /**
+     * Tell whether a standard beam is so thin it could be a cue beam: it then leaves the
+     * choice between small and standard heads on its stems to the heads themselves.
+     */
+    private boolean isThin (AbstractBeamInter beam)
+    {
+        return beam.getHeight() < (scale.getBeamThickness() * constants.maxThinBeamRatio
+                .getValue());
     }
 
     //---------------------//
@@ -2629,6 +2644,10 @@ public class SigReducer
         private final Constant.Ratio ledgerVerticalMarginRatio = new Constant.Ratio(
                 0.33,
                 "Ratio of staff interline to fix shared ledgers");
+
+        private final Constant.Ratio maxThinBeamRatio = new Constant.Ratio(
+                0.75,
+                "Maximum thickness ratio of a standard beam that may bear small heads");
     }
 
     //------------------//

@@ -33,6 +33,7 @@ public enum GlyphGroup
 {
     /** Only the first ones are needed. */
     BEAM_SPOT("Beam-oriented spot"),
+    THIN_BEAM_SPOT("Spot of a thin beam"),
     BLACK_HEAD_SPOT("BlackHead-oriented spot"),
     BLACK_STACK_SPOT("Stack of BlackHead-oriented spot"),
     HEAD_SPOT("Head-oriented spot"),

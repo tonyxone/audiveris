@@ -1101,8 +1101,10 @@ public class MeasureRhythm
                     chord.setAndPushTime(newTime);
                 }
 
-                final MeasureSlot chSlot = ((CompoundSlot) chord.getSlot()).getNarrowSlot(chord);
-                chSlot.setTimeOffset(newTime);
+                // A chord added by the implicit tuplets may still have no slot
+                if (chord.getSlot() instanceof CompoundSlot compound) {
+                    compound.getNarrowSlot(chord).setTimeOffset(newTime);
+                }
             }
 
             prevChord = chord;

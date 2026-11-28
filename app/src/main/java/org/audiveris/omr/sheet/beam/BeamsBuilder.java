@@ -126,6 +126,9 @@ public class BeamsBuilder
     /** Parameters to build small beam items, if so needed. */
     private ItemParameters smallParams;
 
+    /** Parameters for thin standard beams, such as the eighth beams of an upper voice. */
+    private ItemParameters thinParams;
+
     /**
      * Beams (and hooks) for this system.
      * Collection is called raw to remind us it is NOT sorted
@@ -144,6 +147,9 @@ public class BeamsBuilder
 
     /** Remaining beam spots candidates, sorted by abscissa. */
     private List<Glyph> sortedBeamSpots;
+
+    /** Spots of thin beams only, sorted by ordinate, tried only as thin beams. */
+    private List<Glyph> sortedThinSpots;
 
     /** Vertical stem seeds, sorted by abscissa. */
     private List<Glyph> sortedSystemSeeds;
@@ -234,6 +240,10 @@ public class BeamsBuilder
 
         // Select parameters for standard items
         stdParams = new ItemParameters(scale, scale.getItemValue(Scale.Item.beam), false);
+        thinParams = new ItemParameters(
+                scale,
+                scale.getItemValue(Scale.Item.beam) * constants.thinBeamRatio.getValue(),
+                false);
 
         // Select parameters for small items?
         Integer smallHeight = scale.getItemValue(Scale.Item.smallBeam);
@@ -250,6 +260,9 @@ public class BeamsBuilder
         // First, retrieve candidates from spots
         sortedBeamSpots = system.getGroupedGlyphs(GlyphGroup.BEAM_SPOT);
         Collections.sort(sortedBeamSpots, Glyphs.byFullOrdinate);
+        sortedThinSpots = system.getGroupedGlyphs(GlyphGroup.THIN_BEAM_SPOT);
+        sortedThinSpots.removeAll(sortedBeamSpots);
+        Collections.sort(sortedThinSpots, Glyphs.byFullOrdinate);
 
         // Create initial beams by checking spots individually
         createBeams();
@@ -731,6 +744,66 @@ public class BeamsBuilder
                 logger.info("VIP beam#{} {}", glyph.getId(), failure);
             }
         }
+
+        // Spots of thin beams, tried as thin beams only, kept only where stems end along them
+        for (Glyph glyph : sortedThinSpots) {
+            final List<Inter> before = sig.inters(AbstractBeamInter.class);
+            final String failure = checkBeamGlyph(glyph, false, thinParams, null);
+
+            for (Inter inter : sig.inters(AbstractBeamInter.class)) {
+                if (!before.contains(inter) && !hasStemsAlong((AbstractBeamInter) inter)) {
+                    inter.remove();
+                }
+            }
+
+            if ((failure != null) && glyph.isVip()) {
+                logger.info("VIP thin beam#{} {}", glyph.getId(), failure);
+            }
+        }
+    }
+
+    //---------------//
+    // hasStemsAlong //
+    //---------------//
+    /**
+     * Tell whether enough stem seeds end along the provided beam.
+     * <p>
+     * Thin standard beams, such as the eighth beams above the upper voice of Chopin's Winter
+     * Wind, are accepted only where the stems of their notes end. Other thin straight shapes do
+     * not have such stems.
+     *
+     * @param beam the thin beam candidate
+     * @return true if so
+     */
+    private boolean hasStemsAlong (AbstractBeamInter beam)
+    {
+        final Line2D median = beam.getMedian();
+        if (median.getP1().distance(median.getP2()) < params.minThinBeamLength) {
+            return false; // Too short, as the beam of a few grace notes
+        }
+
+        final double maxDy = (beam.getHeight() / 2) + params.maxThinStemDy;
+        final List<Glyph> seeds = system.getGroupedGlyphs(GlyphGroup.VERTICAL_SEED);
+        int count = 0;
+
+        for (Glyph seed : seeds) {
+            final Rectangle box = seed.getBounds();
+            final double x = box.getCenterX();
+
+            if ((x < median.getX1()) || (x > median.getX2())) {
+                continue;
+            }
+
+            final double y = LineUtil.yAtX(median, x);
+            final double dyTop = Math.abs(box.y - y);
+            final double dyBottom = Math.abs((box.y + box.height) - y);
+
+            if (Math.min(dyTop, dyBottom) <= maxDy) {
+                count++;
+            }
+        }
+
+        return count >= constants.minThinBeamStems.getValue();
     }
 
     //-----------------------//
@@ -1774,6 +1847,23 @@ public class BeamsBuilder
                 1.0,
                 "Ordinate shift of aggregate box");
 
+        private final Constant.Ratio thinBeamRatio = new Constant.Ratio(
+                0.65,
+                "Ratio applied for thin standard beams height");
+
+        private final Constant.Integer minThinBeamStems = new Constant.Integer(
+                "stems",
+                3,
+                "Minimum number of stem seeds ending along a thin beam");
+
+        private final Scale.Fraction minThinBeamLength = new Scale.Fraction(
+                4,
+                "Minimum length of a thin beam");
+
+        private final Scale.Fraction maxThinStemDy = new Scale.Fraction(
+                0.5,
+                "Maximum vertical gap between a thin beam and the end of a stem seed");
+
         private final Constant.Ratio cueBeamRatio = new Constant.Ratio(
                 0.6,
                 "Ratio applied for cue beams height");
@@ -2219,6 +2309,10 @@ public class BeamsBuilder
 
         final int cueYMargin;
 
+        final int maxThinStemDy;
+
+        final int minThinBeamLength;
+
         final int cueBoxDx;
 
         final int cueBoxDy;
@@ -2254,6 +2348,8 @@ public class BeamsBuilder
             minExtBlackRatio = constants.minExtBlackRatio.getValue();
             cueXMargin = scale.toPixels(constants.cueXMargin);
             cueYMargin = scale.toPixels(constants.cueYMargin);
+            maxThinStemDy = scale.toPixels(constants.maxThinStemDy);
+            minThinBeamLength = scale.toPixels(constants.minThinBeamLength);
             cueBoxDx = scale.toPixels(constants.cueBoxDx);
             cueBoxDy = scale.toPixels(constants.cueBoxDy);
             cueBeamRatio = constants.cueBeamRatio.getValue();
