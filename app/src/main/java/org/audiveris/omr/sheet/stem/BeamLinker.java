@@ -1367,6 +1367,14 @@ public class BeamLinker
                         }
                     }
 
+                    // A weak void head hiding a much better filled head is a fake
+                    if (ShapeSet.HalfHeads.contains(headShape) && hidesBetterFilledHead(head)) {
+                        if (beam.isVip() || head.isVip()) {
+                            logger.info("VIP {} hides a better filled head", head);
+                        }
+                        continue;
+                    }
+
                     // Check head is far enough from beam group end
                     final double dy = yDir * (head.getCenter().y - yLastBorder);
                     if (dy < params.minBeamHeadDy) {
@@ -1387,6 +1395,50 @@ public class BeamLinker
                 }
 
                 return cLinkers;
+            }
+
+            //-----------------------//
+            // hidesBetterFilledHead //
+            //-----------------------//
+            /**
+             * Check whether the provided void head overlaps a filled head of same size
+             * with a clearly better grade, while lying closer to the beam.
+             * <p>
+             * Such void head is just a poor reading of the filled head pixels, shifted towards
+             * the beam where a stem gap makes it look hollow.
+             * Linking it to the beam stem would stop the stem before the real head.
+             *
+             * @param head the void head
+             * @return true if so
+             */
+            private boolean hidesBetterFilledHead (HeadInter head)
+            {
+                final Rectangle box = head.getBounds();
+                final boolean small = head.getShape().isSmallHead();
+                final double minGrade = head.getGrade() + constants.minFilledHeadAdvantage
+                        .getValue();
+                final double minShift = scale.toPixels(constants.minVoidHeadShift);
+                final double yVoid = head.getCenter().y;
+
+                final List<Inter> overlaps = Inters.intersectedInters(
+                        retriever.getSystemHeads(),
+                        GeoOrder.NONE,
+                        box);
+
+                for (Inter inter : overlaps) {
+                    if ((inter == head) || inter.isRemoved() || ShapeSet.HalfHeads.contains(inter
+                            .getShape()) || (inter.getShape().isSmallHead() != small)
+                            || (inter.getGrade() < minGrade)) {
+                        continue;
+                    }
+
+                    // Void head must lie between beam and filled head
+                    if ((yDir * (inter.getCenter().y - yVoid)) >= minShift) {
+                        return true;
+                    }
+                }
+
+                return false;
             }
 
             //------------//
@@ -1814,6 +1866,14 @@ public class BeamLinker
         private final Constant.Boolean allowSmallHeadOnStandardBeam = new Constant.Boolean(
                 false,
                 "Should we allow small heads linked with standard beams?");
+
+        private final Constant.Ratio minFilledHeadAdvantage = new Constant.Ratio(
+                0.3,
+                "Minimum grade advantage of a filled head over an overlapping void head");
+
+        private final Scale.Fraction minVoidHeadShift = new Scale.Fraction(
+                0.4,
+                "Minimum shift of a fake void head towards the beam, from its filled head");
 
         private final Constant.Ratio maxShorterRatio = new Constant.Ratio(
                 0.8,
