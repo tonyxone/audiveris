@@ -35,11 +35,15 @@ import org.audiveris.omr.glyph.Grades;
 import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.glyph.ShapeSet;
 import org.audiveris.omr.math.GeoUtil;
+import org.audiveris.omr.run.Orientation;
+import org.audiveris.omr.run.RunTable;
+import org.audiveris.omr.run.RunTableFactory;
 import org.audiveris.omr.score.TimeRational;
 import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.SystemInfo;
+import org.audiveris.omr.sheet.grid.LineInfo;
 import org.audiveris.omr.sheet.vector.VectorChecker;
 import org.audiveris.omr.sheet.vector.VectorSymbols;
 import org.audiveris.omr.sig.SIGraph;
@@ -63,6 +67,8 @@ import org.audiveris.omr.sig.relation.Relation;
 import org.audiveris.omr.util.Dumping;
 import org.audiveris.omr.util.Navigable;
 import org.audiveris.omr.util.StopWatch;
+
+import ij.process.ByteProcessor;
 
 import org.jgrapht.alg.connectivity.ConnectivityInspector;
 import org.jgrapht.graph.SimpleGraph;
@@ -256,6 +262,28 @@ public class SymbolsBuilder
                 constants.maxEvaluationCount.getValue(),
                 Grades.symbolMinGrade,
                 EnumSet.of(Classifier.Condition.CHECKED));
+
+        // A dot touching a staff line keeps the piece of line it touches: weigh it without
+        if ((evals.length > 0) && (evals[0].shape == Shape.DOT_set)
+                && (evals[0].grade < constants.maxLineDotGrade.getValue())) {
+            final Glyph trimmed = trimStaffLine(glyph, closestStaff);
+
+            if (trimmed != null) {
+                final Evaluation[] trimmedEvals = classifier.evaluate(
+                        trimmed,
+                        system,
+                        constants.maxEvaluationCount.getValue(),
+                        Grades.symbolMinGrade,
+                        EnumSet.of(Classifier.Condition.CHECKED));
+
+                if ((trimmedEvals.length > 0) && (trimmedEvals[0].shape == Shape.DOT_set)
+                        && (trimmedEvals[0].grade > evals[0].grade)) {
+                    logger.debug("{} read without staff line as {}", glyph, trimmedEvals[0]);
+                    glyph = sheet.getGlyphIndex().registerOriginal(trimmed);
+                    evals = trimmedEvals;
+                }
+            }
+        }
 
         // A flag the PDF draws there is proposed, from its own pixels, when the classifier proposes
         // no flag for the glyph and none is there yet: it may score a plain flag too low to keep it
@@ -990,6 +1018,69 @@ public class SymbolsBuilder
         return false;
     }
 
+    //---------------//
+    // trimStaffLine //
+    //---------------//
+    /**
+     * Report the provided small glyph without the rows of a staff line it ends on, if any.
+     *
+     * @param glyph the glyph, no taller than an interline
+     * @param staff the closest staff
+     * @return the glyph without the staff line rows at its top or bottom, or null
+     */
+    private Glyph trimStaffLine (Glyph glyph,
+                                 Staff staff)
+    {
+        final Rectangle box = glyph.getBounds();
+        final int interline = staff.getSpecificInterline();
+
+        if ((box.height > interline) || (box.width > interline)) {
+            return null;
+        }
+
+        final Integer fore = sheet.getScale().getFore();
+        final double halfLine = ((fore != null) ? fore : 3) / 2.0 + 0.5;
+        final double xMid = box.getCenterX();
+
+        for (LineInfo line : staff.getLines()) {
+            final double y = line.yAt(xMid);
+            final int bandTop = (int) Math.ceil(y - halfLine - 0.5);
+            final int bandBot = (int) Math.floor(y + halfLine - 0.5);
+            final int boxBot = box.y + box.height - 1;
+            final int keepTop;
+            final int keepBot;
+
+            if ((bandTop > box.y) && (bandTop <= boxBot) && (bandBot >= boxBot)) {
+                // Line at glyph bottom
+                keepTop = box.y;
+                keepBot = bandTop - 1;
+            } else if ((bandBot < boxBot) && (bandBot >= box.y) && (bandTop <= box.y)) {
+                // Line at glyph top
+                keepTop = bandBot + 1;
+                keepBot = boxBot;
+            } else {
+                continue;
+            }
+
+            final int height = keepBot - keepTop + 1;
+
+            if (height < (box.height / 2)) {
+                return null;
+            }
+
+            final ByteProcessor buf = glyph.getBuffer();
+            buf.setRoi(0, keepTop - box.y, box.width, height);
+
+            final ByteProcessor part = (ByteProcessor) buf.crop();
+            final RunTable table = new RunTableFactory(Orientation.VERTICAL).createTable(part);
+            final Glyph trimmed = new Glyph(box.x, keepTop, table);
+
+            return (trimmed.getWeight() > 0) ? trimmed : null;
+        }
+
+        return null;
+    }
+
     //-----------------//
     // processClusters //
     //-----------------//
@@ -1148,6 +1239,10 @@ public class SymbolsBuilder
         private final Scale.Fraction maxGap = new Scale.Fraction(
                 0.8,
                 "Maximum distance between two compound parts");
+
+        private final Constant.Ratio maxLineDotGrade = new Constant.Ratio(
+                0.5,
+                "Maximum grade of a dot for a new try without the staff line it touches");
 
         private final Scale.AreaFraction minWeight = new Scale.AreaFraction(
                 0.03,
